@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "32483454486",
+    "project_id": "bfp-finalproject",
+    "storage_bucket": "bfp-finalproject.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:32483454486:android:5b89cbf768faf1880e8f37",
+        "android_client_info": {
+          "package_name": "com.example.bfp_final"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAHN7DWcqxFIJLaV_OjGlHpDyHvXOqXyT4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:32483454486:android:4ea5094a25ea3d210e8f37",
+        "android_client_info": {
+          "package_name": "com.gio.fireout"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAHN7DWcqxFIJLaV_OjGlHpDyHvXOqXyT4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
