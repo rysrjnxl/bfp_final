@@ -1,4 +1,5 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 class RegisterPage extends StatefulWidget {
@@ -11,33 +12,33 @@ class RegisterPage extends StatefulWidget {
 class _RegisterPageState extends State<RegisterPage> {
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
+  final TextEditingController _usernameController = TextEditingController();
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
   Future<void> _handleRegister() async {
+  String email = _emailController.text.trim();
+  String password = _passwordController.text.trim();
+  String username = _usernameController.text.trim();
+
   try {
-    if (_emailController.text.isNotEmpty && _passwordController.text.isNotEmpty) {
-      await _auth.createUserWithEmailAndPassword(
-        email: _emailController.text.trim(),
-        password: _passwordController.text.trim(),
+    if (email.isNotEmpty && password.isNotEmpty && username.isNotEmpty) {
+      UserCredential userCredential = await _auth.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
       );
 
-      if (!mounted) return; 
+      await userCredential.user?.updateDisplayName(username);
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Registration Successful! Please Login.')),
-      );
+      await FirebaseFirestore.instance.collection('users').doc(userCredential.user!.uid).set({
+        'username': username,
+        'email': email,
+        'uid': userCredential.user!.uid,
+      });
+
+      if (!mounted) return;
       Navigator.pop(context);
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill in all fields')),
-      );
     }
-  } on FirebaseAuthException catch (e) {
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(e.message ?? 'An error occurred')),
-    );
+  } catch (e) {
   }
 }
 

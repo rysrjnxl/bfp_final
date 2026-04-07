@@ -1,5 +1,7 @@
 import 'package:bfp_final/firebase_options.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'home.dart';
 import 'signup.dart';
@@ -39,22 +41,43 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> {
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
+  
 
-  void _handleLogin() {
-    String email = _emailController.text;
-    String password = _passwordController.text;
+  void _handleLogin() async {
+  String input = _emailController.text.trim(); // This is now 'Username or Email'
+  String password = _passwordController.text.trim();
+  String emailToSignIn = input;
 
-    if (email.isNotEmpty && password.isNotEmpty) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (context) => const HomeScreen()),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter email and password')),
-      );
+  try {
+    if (!input.contains('@')) {
+      final query = await FirebaseFirestore.instance
+          .collection('users')
+          .where('username', isEqualTo: input)
+          .get();
+
+      if (query.docs.isNotEmpty) {
+        emailToSignIn = query.docs.first.get('email');
+      } else {
+        throw FirebaseAuthException(code: 'user-not-found', message: 'Username not found');
+      }
     }
+
+    await FirebaseAuth.instance.signInWithEmailAndPassword(
+      email: emailToSignIn,
+      password: password,
+    );
+
+    if (!mounted) return;
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (context) => const HomeScreen()),
+    );
+  } on FirebaseAuthException catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(e.message ?? 'Auth Error')),
+    );
   }
+}
 
   @override
   Widget build(BuildContext context) {

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart'; // Import added
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'main.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -69,7 +71,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Determine the name to show; defaults to 'User' if no name or email exists
     String displayName = user?.displayName ?? user?.email ?? 'User';
 
     final List<Widget> widgetOptions = <Widget>[
@@ -99,7 +100,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        // Updated title to show the user's name
         title: Text('Welcome, $displayName'), 
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         automaticallyImplyLeading: false,
@@ -111,7 +111,11 @@ class _HomeScreenState extends State<HomeScreen> {
               
               if (!mounted) return; 
 
-              Navigator.pop(context);
+              // This goes back to login and prevents returning to home via back button
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(builder: (context) => const LoginPage()),
+              );
             },
           ),
         ],
