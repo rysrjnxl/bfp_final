@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // Import added
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -9,6 +10,9 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _selectedIndex = 0;
+
+  // Retrieve current user instance
+  final User? user = FirebaseAuth.instance.currentUser;
 
   Widget _buildFireTile(BuildContext context, String label, IconData icon, Color color) {
     return Card(
@@ -65,12 +69,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Determine the name to show; defaults to 'User' if no name or email exists
+    String displayName = user?.displayName ?? user?.email ?? 'User';
+
     final List<Widget> widgetOptions = <Widget>[
-      // Home Tab with Tiles
       Padding(
         padding: const EdgeInsets.all(16.0),
         child: GridView.count(
-          crossAxisCount: 2, // Two tiles per row
+          crossAxisCount: 2,
           crossAxisSpacing: 16,
           mainAxisSpacing: 16,
           children: [
@@ -80,7 +86,6 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
       ),
-      // Messages Tab
       const Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -94,13 +99,20 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Fire Out'),
+        // Updated title to show the user's name
+        title: Text('Welcome, $displayName'), 
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         automaticallyImplyLeading: false,
         actions: [
           IconButton(
             icon: const Icon(Icons.logout),
-            onPressed: () => Navigator.pop(context),
+            onPressed: () async {
+              await FirebaseAuth.instance.signOut(); 
+              
+              if (!mounted) return; 
+
+              Navigator.pop(context);
+            },
           ),
         ],
       ),
