@@ -2,6 +2,7 @@ import 'package:bfp_final/firebase_options.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'home.dart';
+import 'signup.dart';
 
 Future <void> main() async{
   WidgetsFlutterBinding.ensureInitialized();
@@ -117,6 +118,21 @@ class _LoginPageState extends State<LoginPage> {
                   },
                   child: const Text('Forgot Password?'),
                 ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Text("Don't have an account?"),
+                    TextButton(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (context) => const RegisterPage()),
+                        );
+                      },
+                      child: const Text('Sign Up'),
+                    ),
+                  ],
+                )
               ],
             ),
           ),
