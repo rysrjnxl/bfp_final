@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'main.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -12,8 +11,6 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _selectedIndex = 0;
-
-  // Retrieve current user instance
   final User? user = FirebaseAuth.instance.currentUser;
 
   Widget _buildFireTile(BuildContext context, String label, IconData icon, Color color) {
@@ -28,7 +25,7 @@ class _HomeScreenState extends State<HomeScreen> {
             builder: (BuildContext context) {
               return AlertDialog(
                 title: const Text('Confirm Alert'),
-                content: const Text('Are you sure you want to alert all personnel?'),
+                content: Text('Are you sure you want to alert all personnel for $label?'),
                 actions: [
                   TextButton(
                     onPressed: () => Navigator.pop(context), 
@@ -73,66 +70,53 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     String displayName = user?.displayName ?? user?.email ?? 'User';
 
-    final List<Widget> widgetOptions = <Widget>[
-      Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: GridView.count(
-          crossAxisCount: 2,
-          crossAxisSpacing: 16,
-          mainAxisSpacing: 16,
-          children: [
-            _buildFireTile(context, 'Residential Fire', Icons.home_work, Colors.red),
-            _buildFireTile(context, 'Grass Fire', Icons.grass, Colors.green),
-            _buildFireTile(context, 'Building Fire', Icons.apartment, Colors.yellow[700]!),
-          ],
-        ),
-      ),
-      const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.message, size: 100, color: Color.fromARGB(255, 183, 58, 58)),
-            Text('Messages Tab', style: TextStyle(fontSize: 24)),
-          ],
-        ),
-      ),
-    ];
-
     return Scaffold(
       appBar: AppBar(
-        title: Text('Welcome, $displayName'), 
+        title: Text('Welcome, $displayName'),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         automaticallyImplyLeading: false,
         actions: [
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () async {
-              await FirebaseAuth.instance.signOut(); 
+              await FirebaseAuth.instance.signOut();
               
               if (!mounted) return; 
 
-              // This goes back to login and prevents returning to home via back button
-              Navigator.pushReplacement(
-                context,
+              Navigator.of(context).pushAndRemoveUntil(
                 MaterialPageRoute(builder: (context) => const LoginPage()),
+                (Route<dynamic> route) => false,
               );
             },
           ),
         ],
       ),
-      body: widgetOptions.elementAt(_selectedIndex),
+      body: _selectedIndex == 0 
+          ? Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: GridView.count(
+                crossAxisCount: 2,
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 16,
+                children: [
+                  _buildFireTile(context, 'Residential Fire', Icons.home_work, Colors.red),
+                  _buildFireTile(context, 'Grass Fire', Icons.grass, Colors.green),
+                  // RESTORED: Building Fire Button
+                  _buildFireTile(context, 'Building Fire', Icons.apartment, Colors.yellow[700]!),
+                ],
+              ),
+            )
+          : const Center(
+              child: Text('Messages Tab', style: TextStyle(fontSize: 24)),
+            ),
       bottomNavigationBar: BottomNavigationBar(
-        items: const <BottomNavigationBarItem>[
+        currentIndex: _selectedIndex,
+        onTap: (index) => setState(() => _selectedIndex = index),
+        selectedItemColor: const Color.fromARGB(255, 183, 58, 58),
+        items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
           BottomNavigationBarItem(icon: Icon(Icons.message), label: 'Messages'),
         ],
-        currentIndex: _selectedIndex,
-        selectedItemColor: const Color.fromARGB(255, 183, 58, 58),
-        onTap: (index) {
-          setState(() {
-            _selectedIndex = index;
-          });
-        },
       ),
     );
   }

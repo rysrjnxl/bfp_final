@@ -41,43 +41,45 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> {
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
-  
 
   void _handleLogin() async {
-  String input = _emailController.text.trim(); // This is now 'Username or Email'
-  String password = _passwordController.text.trim();
-  String emailToSignIn = input;
+    String input = _emailController.text.trim();
+    String password = _passwordController.text.trim();
+    String emailToSignIn = input;
 
-  try {
-    if (!input.contains('@')) {
-      final query = await FirebaseFirestore.instance
-          .collection('users')
-          .where('username', isEqualTo: input)
-          .get();
+    try {
+      if (!input.contains('@')) {
+        final query = await FirebaseFirestore.instance
+            .collection('users')
+            .where('username', isEqualTo: input)
+            .get();
 
-      if (query.docs.isNotEmpty) {
-        emailToSignIn = query.docs.first.get('email');
-      } else {
-        throw FirebaseAuthException(code: 'user-not-found', message: 'Username not found');
+        if (query.docs.isNotEmpty) {
+          emailToSignIn = query.docs.first.get('email');
+        } else {
+          throw FirebaseAuthException(
+            code: 'user-not-found', 
+            message: 'Username not found'
+          );
+        }
       }
+
+      await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: emailToSignIn,
+        password: password,
+      );
+
+      if (!mounted) return;
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const HomeScreen()),
+      );
+    } on FirebaseAuthException catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message ?? 'Auth Error')),
+      );
     }
-
-    await FirebaseAuth.instance.signInWithEmailAndPassword(
-      email: emailToSignIn,
-      password: password,
-    );
-
-    if (!mounted) return;
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (context) => const HomeScreen()),
-    );
-  } on FirebaseAuthException catch (e) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(e.message ?? 'Auth Error')),
-    );
   }
-}
 
   @override
   Widget build(BuildContext context) {
@@ -101,18 +103,16 @@ class _LoginPageState extends State<LoginPage> {
                   style: Theme.of(context).textTheme.headlineMedium,
                 ),
                 const SizedBox(height: 30),
-                // Email Field
                 TextField(
                   controller: _emailController,
                   decoration: const InputDecoration(
-                    labelText: 'Email',
+                    labelText: 'Username or Email', 
                     border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.email),
+                    prefixIcon: Icon(Icons.person), 
                   ),
                   keyboardType: TextInputType.emailAddress,
                 ),
                 const SizedBox(height: 20),
-                // Password Field
                 TextField(
                   controller: _passwordController,
                   obscureText: true,
@@ -123,22 +123,20 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                 ),
                 const SizedBox(height: 30),
-                // Login Button
                 SizedBox(
                   width: double.infinity,
                   height: 50,
                   child: ElevatedButton(
                     onPressed: _handleLogin,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Color.fromARGB(255, 183, 58, 58),
+                      backgroundColor: const Color.fromARGB(255, 183, 58, 58),
                       foregroundColor: Colors.white,
                     ),
                     child: const Text('Login', style: TextStyle(fontSize: 18)),
                   ),
                 ),
                 TextButton(
-                  onPressed: () {
-                  },
+                  onPressed: () {},
                   child: const Text('Forgot Password?'),
                 ),
                 Row(
