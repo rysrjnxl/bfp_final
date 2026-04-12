@@ -2,15 +2,14 @@ import 'package:bfp_final/firebase_options.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter/material.dart';
 import 'home.dart';
 import 'signup.dart';
 
-Future <void> main() async{
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform,
-  );
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   runApp(const MyApp());
 }
 
@@ -23,7 +22,7 @@ class MyApp extends StatelessWidget {
       title: 'BFP Project Login',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor:Color.fromARGB(255, 183, 58, 58)),
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color.fromARGB(255, 183, 58, 58)),
         useMaterial3: true,
       ),
       home: const LoginPage(),
@@ -42,44 +41,71 @@ class _LoginPageState extends State<LoginPage> {
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
 
-  void _handleLogin() async {
-    String input = _emailController.text.trim();
-    String password = _passwordController.text.trim();
-    String emailToSignIn = input;
+  Future<void> _handleGoogleLogin() async {
+  try {
+    final GoogleSignIn googleSignIn = GoogleSignIn();
+    final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
+    if (googleUser == null) return;
 
-    try {
-      if (!input.contains('@')) {
-        final query = await FirebaseFirestore.instance
-            .collection('users')
-            .where('username', isEqualTo: input)
-            .get();
+    final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
 
-        if (query.docs.isNotEmpty) {
-          emailToSignIn = query.docs.first.get('email');
-        } else {
-          throw FirebaseAuthException(
-            code: 'user-not-found', 
-            message: 'Username not found'
-          );
-        }
-      }
+    final AuthCredential credential = GoogleAuthProvider.credential(
+      accessToken: googleAuth.accessToken,
+      idToken: googleAuth.idToken,
+    );
 
-      await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: emailToSignIn,
-        password: password,
-      );
+    await FirebaseAuth.instance.signInWithCredential(credential);
 
-      if (!mounted) return;
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const HomeScreen()),
-      );
-    } on FirebaseAuthException catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message ?? 'Auth Error')),
-      );
-    }
+    if (!mounted) return;
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (context) => const HomeScreen()),
+    );
+  } catch (e) {
+    if (!mounted) return; // ← ADD THIS
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Google Auth Error: $e')),
+    );
   }
+}
+
+Future<void> _handleLogin() async {
+  String input = _emailController.text.trim();
+  String password = _passwordController.text.trim();
+  String emailToSignIn = input;
+
+  try {
+    if (!input.contains('@')) {
+      final query = await FirebaseFirestore.instance
+          .collection('users')
+          .where('username', isEqualTo: input)
+          .get();
+
+      if (query.docs.isNotEmpty) {
+        emailToSignIn = query.docs.first.get('email');
+      } else {
+        throw FirebaseAuthException(
+            code: 'user-not-found', message: 'Username not found');
+      }
+    }
+
+    await FirebaseAuth.instance.signInWithEmailAndPassword(
+      email: emailToSignIn,
+      password: password,
+    );
+
+    if (!mounted) return;
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (context) => const HomeScreen()),
+    );
+  } on FirebaseAuthException catch (e) {
+    if (!mounted) return; // ← ADD THIS
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(e.message ?? 'Auth Error')),
+    );
+  }
+}
 
   @override
   Widget build(BuildContext context) {
@@ -96,21 +122,20 @@ class _LoginPageState extends State<LoginPage> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.lock_outline, size: 100, color: Color.fromARGB(255, 183, 58, 58)),
+                const Icon(Icons.local_fire_department, size: 100, color: Color.fromARGB(255, 183, 58, 58)),
                 const SizedBox(height: 30),
                 Text(
-                  'Login',
+                  'Welcome!',
                   style: Theme.of(context).textTheme.headlineMedium,
                 ),
                 const SizedBox(height: 30),
                 TextField(
                   controller: _emailController,
                   decoration: const InputDecoration(
-                    labelText: 'Username or Email', 
+                    labelText: 'Username or Email',
                     border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.person), 
+                    prefixIcon: Icon(Icons.person),
                   ),
-                  keyboardType: TextInputType.emailAddress,
                 ),
                 const SizedBox(height: 20),
                 TextField(
@@ -135,6 +160,19 @@ class _LoginPageState extends State<LoginPage> {
                     child: const Text('Login', style: TextStyle(fontSize: 18)),
                   ),
                 ),
+                const SizedBox(height: 15),
+                SizedBox(
+                  width: double.infinity,
+                  height: 50,
+                  child: OutlinedButton.icon(
+                    label: const Text('Continue with Google'),
+                    onPressed: _handleGoogleLogin,
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Colors.grey),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 15),
                 TextButton(
                   onPressed: () {},
                   child: const Text('Forgot Password?'),

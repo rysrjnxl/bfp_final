@@ -66,6 +66,17 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Future<void> _handleLogout() async {
+  await FirebaseAuth.instance.signOut();
+
+  if (!mounted) return;
+
+  Navigator.of(context).pushAndRemoveUntil(
+    MaterialPageRoute(builder: (context) => const LoginPage()),
+    (Route<dynamic> route) => false,
+  );
+}
+
   @override
   Widget build(BuildContext context) {
     String displayName = user?.displayName ?? user?.email ?? 'User';
@@ -78,16 +89,7 @@ class _HomeScreenState extends State<HomeScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.logout),
-            onPressed: () async {
-              await FirebaseAuth.instance.signOut();
-              
-              if (!mounted) return; 
-
-              Navigator.of(context).pushAndRemoveUntil(
-                MaterialPageRoute(builder: (context) => const LoginPage()),
-                (Route<dynamic> route) => false,
-              );
-            },
+            onPressed: _handleLogout,
           ),
         ],
       ),
