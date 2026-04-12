@@ -2,14 +2,48 @@ import 'package:bfp_final/firebase_options.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'home.dart';
 import 'signup.dart';
+
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  debugPrint("Handling background alert: ${message.messageId}");
+}
+
+final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+    FlutterLocalNotificationsPlugin();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
+  // 2. CONFIGURE HIGH-IMPORTANCE CHANNEL (ANDROID)
+  const AndroidNotificationChannel channel = AndroidNotificationChannel(
+    'high_importance_channel', // ID used in Cloud Functions
+    'Fire Alert Notifications', // Title
+    description: 'This channel is used for high-priority BFP fire alerts.',
+    importance: Importance.max,
+    playSound: true,
+    enableVibration: true,
+  );
+
+  await flutterLocalNotificationsPlugin
+      .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>()
+      ?.createNotificationChannel(channel);
+
+  FirebaseMessaging messaging = FirebaseMessaging.instance;
+  await messaging.requestPermission(alert: true, sound: true, badge: true);
+  
+  await messaging.subscribeToTopic('station_alerts');
+
   runApp(const MyApp());
 }
 
@@ -19,13 +53,26 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'BFP Project Login',
+      title: 'BFP Fire Out',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color.fromARGB(255, 183, 58, 58)),
+        colorScheme: ColorScheme.fromSeed(
+            seedColor: const Color.fromARGB(255, 183, 58, 58)),
         useMaterial3: true,
       ),
-      home: const LoginPage(),
+      // Auto-check if user is logged in
+      home: StreamBuilder<User?>(
+        stream: FirebaseAuth.instance.authStateChanges(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          }
+          if (snapshot.hasData) {
+            return const HomeScreen();
+          }
+          return const LoginPage();
+        },
+      ),
     );
   }
 }
@@ -42,70 +89,71 @@ class _LoginPageState extends State<LoginPage> {
   final TextEditingController _passwordController = TextEditingController();
 
   Future<void> _handleGoogleLogin() async {
-  try {
-    final GoogleSignIn googleSignIn = GoogleSignIn();
-    final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
-    if (googleUser == null) return;
+    try {
+      final GoogleSignIn googleSignIn = GoogleSignIn();
+      final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
+      if (googleUser == null) return;
 
-    final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+      final GoogleSignInAuthentication googleAuth =
+          await googleUser.authentication;
 
-    final AuthCredential credential = GoogleAuthProvider.credential(
-      accessToken: googleAuth.accessToken,
-      idToken: googleAuth.idToken,
-    );
+      final AuthCredential credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
 
-    await FirebaseAuth.instance.signInWithCredential(credential);
+      await FirebaseAuth.instance.signInWithCredential(credential);
 
-    if (!mounted) return;
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (context) => const HomeScreen()),
-    );
-  } catch (e) {
-    if (!mounted) return; // ← ADD THIS
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Google Auth Error: $e')),
-    );
-  }
-}
-
-Future<void> _handleLogin() async {
-  String input = _emailController.text.trim();
-  String password = _passwordController.text.trim();
-  String emailToSignIn = input;
-
-  try {
-    if (!input.contains('@')) {
-      final query = await FirebaseFirestore.instance
-          .collection('users')
-          .where('username', isEqualTo: input)
-          .get();
-
-      if (query.docs.isNotEmpty) {
-        emailToSignIn = query.docs.first.get('email');
-      } else {
-        throw FirebaseAuthException(
-            code: 'user-not-found', message: 'Username not found');
-      }
+      if (!mounted) return;
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const HomeScreen()),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Google Auth Error: $e')),
+      );
     }
-
-    await FirebaseAuth.instance.signInWithEmailAndPassword(
-      email: emailToSignIn,
-      password: password,
-    );
-
-    if (!mounted) return;
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (context) => const HomeScreen()),
-    );
-  } on FirebaseAuthException catch (e) {
-    if (!mounted) return; // ← ADD THIS
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(e.message ?? 'Auth Error')),
-    );
   }
-}
+
+  Future<void> _handleLogin() async {
+    String input = _emailController.text.trim();
+    String password = _passwordController.text.trim();
+    String emailToSignIn = input;
+
+    try {
+      if (!input.contains('@')) {
+        final query = await FirebaseFirestore.instance
+            .collection('users')
+            .where('username', isEqualTo: input)
+            .get();
+
+        if (query.docs.isNotEmpty) {
+          emailToSignIn = query.docs.first.get('email');
+        } else {
+          throw FirebaseAuthException(
+              code: 'user-not-found', message: 'Username not found');
+        }
+      }
+
+      await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: emailToSignIn,
+        password: password,
+      );
+
+      if (!mounted) return;
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const HomeScreen()),
+      );
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message ?? 'Auth Error')),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -122,7 +170,8 @@ Future<void> _handleLogin() async {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.local_fire_department, size: 100, color: Color.fromARGB(255, 183, 58, 58)),
+                const Icon(Icons.local_fire_department,
+                    size: 100, color: Color.fromARGB(255, 183, 58, 58)),
                 const SizedBox(height: 30),
                 Text(
                   'Welcome!',
@@ -166,6 +215,7 @@ Future<void> _handleLogin() async {
                   height: 50,
                   child: OutlinedButton.icon(
                     label: const Text('Continue with Google'),
+                    icon: const Icon(Icons.account_circle),
                     onPressed: _handleGoogleLogin,
                     style: OutlinedButton.styleFrom(
                       side: const BorderSide(color: Colors.grey),
@@ -185,7 +235,8 @@ Future<void> _handleLogin() async {
                       onPressed: () {
                         Navigator.push(
                           context,
-                          MaterialPageRoute(builder: (context) => const RegisterPage()),
+                          MaterialPageRoute(
+                              builder: (context) => const RegisterPage()),
                         );
                       },
                       child: const Text('Sign Up'),

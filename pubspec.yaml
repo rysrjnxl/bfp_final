@@ -41,21 +41,20 @@ dependencies:
   slider_button: ^3.0.0
   cloud_functions: ^6.1.0
   firebase_messaging: ^16.1.3
-  flutter_local_notifications: ^21.0.0
+  flutter_local_notifications: ^19.3.1
   wakelock_plus: ^1.5.1
 
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-
-  # The "flutter_lints" package below contains a set of recommended lints to
-  # encourage good coding practices. The lint set provided by the package is
-  # activated in the `analysis_options.yaml` file located at the root of your
-  # package. See that file for information about deactivating specific lint
-  # rules and activating additional ones.
+  flutter_launcher_icons: ^0.14.4
   flutter_lints: ^6.0.0
 
+flutter_icons:
+  android: true
+  ios: true
+  image_path: "lib/assets/img/logo.png"
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 
@@ -73,6 +72,7 @@ flutter:
   #   - images/a_dot_ham.jpeg
 assets:
   - lib\assets\img\google.png
+  - lib/assets/img/logo.png
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
 

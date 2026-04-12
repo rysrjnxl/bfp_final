@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:slider_button/slider_button.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'main.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -24,7 +26,7 @@ class _HomeScreenState extends State<HomeScreen> {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         decoration: BoxDecoration(
-          color: isSelected ? color : color.withValues(alpha: 1),
+          color: isSelected ? color : color.withValues(alpha: 0.8),
           borderRadius: BorderRadius.circular(15),
           border: isSelected ? Border.all(color: Colors.white, width: 4) : null,
           boxShadow: isSelected
@@ -196,7 +198,42 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+@override
+void initState() {
+  super.initState();
+  
+  FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+    // This triggers when the app is OPEN and a fire alert arrives
+    if (message.notification != null) {
+      // 1. Force the screen to stay on
+      WakelockPlus.enable();
+      
+      // 2. Show a custom Full-Screen Alert Dialog (The "Overlay")
+      _showEmergencyOverlay(message.notification!.title!, message.notification!.body!);
+    }
+  });
+}
 
+void _showEmergencyOverlay(String title, String body) {
+  showDialog(
+    context: context,
+    barrierDismissible: false, // Must tap button to close
+    builder: (context) => AlertDialog(
+      backgroundColor: Colors.red[900],
+      title: Text(title, style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+      content: Text(body, style: const TextStyle(color: Colors.white, fontSize: 18)),
+      actions: [
+        ElevatedButton(
+          onPressed: () {
+            WakelockPlus.disable(); // Allow screen to sleep again
+            Navigator.pop(context);
+          },
+          child: const Text("ACKNOWLEDGE"),
+        )
+      ],
+    ),
+  );
+}
   @override
   void dispose() {
     _noteController.dispose();
