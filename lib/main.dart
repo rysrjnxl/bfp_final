@@ -24,10 +24,9 @@ Future<void> main() async {
 
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
-  // 2. CONFIGURE HIGH-IMPORTANCE CHANNEL (ANDROID)
   const AndroidNotificationChannel channel = AndroidNotificationChannel(
-    'high_importance_channel', // ID used in Cloud Functions
-    'Fire Alert Notifications', // Title
+    'high_importance_channel',
+    'Fire Alert Notifications',
     description: 'This channel is used for high-priority BFP fire alerts.',
     importance: Importance.max,
     playSound: true,
@@ -60,7 +59,6 @@ class MyApp extends StatelessWidget {
             seedColor: const Color.fromARGB(255, 183, 58, 58)),
         useMaterial3: true,
       ),
-      // Auto-check if user is logged in
       home: StreamBuilder<User?>(
         stream: FirebaseAuth.instance.authStateChanges(),
         builder: (context, snapshot) {
@@ -89,33 +87,37 @@ class _LoginPageState extends State<LoginPage> {
   final TextEditingController _passwordController = TextEditingController();
 
   Future<void> _handleGoogleLogin() async {
-    try {
-      final GoogleSignIn googleSignIn = GoogleSignIn();
-      final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
-      if (googleUser == null) return;
+  try {
+    final GoogleSignIn googleSignIn = GoogleSignIn();
+    
+    await googleSignIn.signOut();
+    await googleSignIn.disconnect().catchError((_) => null);
 
-      final GoogleSignInAuthentication googleAuth =
-          await googleUser.authentication;
+    final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
+    if (googleUser == null) return;
 
-      final AuthCredential credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
-      );
+    final GoogleSignInAuthentication googleAuth =
+        await googleUser.authentication;
 
-      await FirebaseAuth.instance.signInWithCredential(credential);
+    final AuthCredential credential = GoogleAuthProvider.credential(
+      accessToken: googleAuth.accessToken,
+      idToken: googleAuth.idToken,
+    );
 
-      if (!mounted) return;
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const HomeScreen()),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Google Auth Error: $e')),
-      );
-    }
+    await FirebaseAuth.instance.signInWithCredential(credential);
+
+    if (!mounted) return;
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (context) => const HomeScreen()),
+    );
+  } catch (e) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Google Auth Error: $e')),
+    );
   }
+}
 
   Future<void> _handleLogin() async {
     String input = _emailController.text.trim();
@@ -133,7 +135,7 @@ class _LoginPageState extends State<LoginPage> {
           emailToSignIn = query.docs.first.get('email');
         } else {
           throw FirebaseAuthException(
-              code: 'user-not-found', message: 'Username not found');
+              code: 'user-not-found', message: 'Account not found');
         }
       }
 

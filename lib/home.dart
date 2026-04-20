@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:slider_button/slider_button.dart';
-import 'package:cloud_functions/cloud_functions.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'main.dart';
+
+GlobalKey _sliderKey = GlobalKey();
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -19,6 +21,62 @@ class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _noteController = TextEditingController();
   final User? user = FirebaseAuth.instance.currentUser;
 
+  @override
+  void initState() {
+    super.initState();
+
+    FirebaseFirestore.instance
+        .collection('alarms')
+        .orderBy('timestamp', descending: true)
+        .limit(1)
+        .snapshots()
+        .listen((snapshot) {
+      if (snapshot.docs.isNotEmpty) {
+        var data = snapshot.docs.first.data();
+        Timestamp? time = data['timestamp'] as Timestamp?;
+        if (time != null) {
+          DateTime alarmTime = time.toDate();
+          if (DateTime.now().difference(alarmTime).inSeconds < 10) {
+            if (data['triggeredBy'] != user?.displayName) {
+              _ringPhone(data['fireType'], data['note']);
+            }
+          }
+        }
+      }
+    });
+  }
+
+  void _ringPhone(String fireType, String note) {
+    WakelockPlus.enable();
+    _showEmergencyOverlay(fireType, note);
+  }
+
+  void _showEmergencyOverlay(String title, String body) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.red[900],
+        title: Text(title,
+            style: const TextStyle(
+                color: Colors.white,
+                fontSize: 24,
+                fontWeight: FontWeight.bold)),
+        content: Text(body,
+            style: const TextStyle(color: Colors.white, fontSize: 18)),
+        actions: [
+          ElevatedButton(
+            onPressed: () {
+              WakelockPlus.disable();
+              Navigator.pop(context);
+            },
+            child: const Text("ACKNOWLEDGE"),
+          )
+        ],
+      ),
+    );
+  }
+
   Widget _buildFireTile(String label, IconData icon, Color color) {
     bool isSelected = _selectedFireType == label;
     return GestureDetector(
@@ -26,11 +84,11 @@ class _HomeScreenState extends State<HomeScreen> {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         decoration: BoxDecoration(
-          color: isSelected ? color : color.withValues(alpha: 0.8),
+          color: isSelected ? color : color.withValues(alpha: 0.95),
           borderRadius: BorderRadius.circular(15),
           border: isSelected ? Border.all(color: Colors.white, width: 4) : null,
           boxShadow: isSelected
-              ? [BoxShadow(color: color.withValues(alpha: 0.5), blurRadius: 10)]
+              ? [BoxShadow(color: color.withValues(alpha: 1), blurRadius: 10)]
               : [],
         ),
         child: Column(
@@ -38,9 +96,12 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             Icon(icon, size: 40, color: Colors.white),
             const SizedBox(height: 8),
-            Text(label,
-                style: const TextStyle(
-                    color: Colors.white, fontWeight: FontWeight.bold)),
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                  color: Colors.white, fontWeight: FontWeight.bold),
+            ),
           ],
         ),
       ),
@@ -49,19 +110,18 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _triggerAlarm() async {
     try {
-      final HttpsCallable callable =
-          FirebaseFunctions.instance.httpsCallable('triggerFireAlarm');
-
-      await callable.call({
+      await FirebaseFirestore.instance.collection('alarms').add({
         'fireType': _selectedFireType,
         'note': _noteController.text,
+        'timestamp': FieldValue.serverTimestamp(),
+        'triggeredBy': user?.displayName ?? 'Unknown',
       });
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           backgroundColor: Colors.red,
-          content: Text('ALARM BROADCASTED TO ALL PERSONNEL!'),
+          content: Text('🚨 ALARM POSTED TO STATION BOARD!'),
         ),
       );
 
@@ -70,16 +130,16 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to send alarm: $e')),
+        SnackBar(content: Text('Failed to post alert: $e')),
       );
     }
   }
 
   Future<void> _handleLogout() async {
     await FirebaseAuth.instance.signOut();
+    await GoogleSignIn().signOut();
 
     if (!mounted) return;
-
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (context) => const LoginPage()),
       (route) => false,
@@ -102,6 +162,8 @@ class _HomeScreenState extends State<HomeScreen> {
               mainAxisSpacing: 12,
               crossAxisSpacing: 12,
               childAspectRatio: 1.3,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
               children: [
                 _buildFireTile('Residential Fire', Icons.home, Colors.red),
                 _buildFireTile('Building Fire', Icons.apartment, Colors.orange),
@@ -120,6 +182,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 20),
           Center(
+            key: _sliderKey,
             child: SliderButton(
               action: () async {
                 if (_selectedFireType == null) {
@@ -131,6 +194,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   return false;
                 }
                 await _triggerAlarm();
+                if (!mounted) return true;
+                  setState(() {
+                    _sliderKey = GlobalKey();
+                  });
                 return true;
               },
               label: Text(
@@ -157,8 +224,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    String displayName =
-        user?.displayName ?? user?.email?.split('@')[0] ?? 'User';
+    String displayName = (user?.displayName ?? user?.email?.split('@')[0] ?? 'User')
+    .split(' ')
+    .first;
 
     return Scaffold(
       appBar: AppBar(
@@ -198,42 +266,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
-@override
-void initState() {
-  super.initState();
-  
-  FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-    // This triggers when the app is OPEN and a fire alert arrives
-    if (message.notification != null) {
-      // 1. Force the screen to stay on
-      WakelockPlus.enable();
-      
-      // 2. Show a custom Full-Screen Alert Dialog (The "Overlay")
-      _showEmergencyOverlay(message.notification!.title!, message.notification!.body!);
-    }
-  });
-}
 
-void _showEmergencyOverlay(String title, String body) {
-  showDialog(
-    context: context,
-    barrierDismissible: false, // Must tap button to close
-    builder: (context) => AlertDialog(
-      backgroundColor: Colors.red[900],
-      title: Text(title, style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
-      content: Text(body, style: const TextStyle(color: Colors.white, fontSize: 18)),
-      actions: [
-        ElevatedButton(
-          onPressed: () {
-            WakelockPlus.disable(); // Allow screen to sleep again
-            Navigator.pop(context);
-          },
-          child: const Text("ACKNOWLEDGE"),
-        )
-      ],
-    ),
-  );
-}
   @override
   void dispose() {
     _noteController.dispose();
