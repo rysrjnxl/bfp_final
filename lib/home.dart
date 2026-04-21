@@ -6,7 +6,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'main.dart';
 
-GlobalKey _sliderKey = GlobalKey();
+
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -20,6 +20,9 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _selectedFireType;
   final TextEditingController _noteController = TextEditingController();
   final User? user = FirebaseAuth.instance.currentUser;
+  GlobalKey _sliderKey = GlobalKey();
+
+  String? _lastAlarmId;
 
   @override
   void initState() {
@@ -31,47 +34,107 @@ class _HomeScreenState extends State<HomeScreen> {
         .limit(1)
         .snapshots()
         .listen((snapshot) {
-      if (snapshot.docs.isNotEmpty) {
-        var data = snapshot.docs.first.data();
-        Timestamp? time = data['timestamp'] as Timestamp?;
-        if (time != null) {
-          DateTime alarmTime = time.toDate();
-          if (DateTime.now().difference(alarmTime).inSeconds < 10) {
-            if (data['triggeredBy'] != user?.displayName) {
-              _ringPhone(data['fireType'], data['note']);
-            }
-          }
-        }
+      if (!mounted) return;
+      if (snapshot.docs.isEmpty) return;
+
+      final doc = snapshot.docs.first;
+      final data = doc.data();
+      final String alarmId = doc.id;
+
+      if (alarmId == _lastAlarmId) return;
+
+      final Timestamp? time = data['timestamp'] as Timestamp?;
+      if (time == null) return;
+
+      final DateTime alarmTime = time.toDate();
+      final bool isRecent =
+          DateTime.now().difference(alarmTime).inSeconds < 30;
+
+      final String triggeredBy = data['triggeredBy'] ?? '';
+      final String currentUser = user?.displayName ?? '';
+      final bool isOtherUser = triggeredBy != currentUser;
+
+      if (isRecent && isOtherUser) {
+        _lastAlarmId = alarmId;
+        _ringPhone(
+          data['fireType'] ?? 'Unknown Fire',
+          data['note'] ?? 'No additional notes',
+          triggeredBy,
+        );
       }
     });
   }
 
-  void _ringPhone(String fireType, String note) {
+  void _ringPhone(String fireType, String note, String triggeredBy) {
     WakelockPlus.enable();
-    _showEmergencyOverlay(fireType, note);
+    _showEmergencyOverlay(fireType, note, triggeredBy);
   }
 
-  void _showEmergencyOverlay(String title, String body) {
+  void _showEmergencyOverlay(String fireType, String note, String triggeredBy) {
+    if (!mounted) return;
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
         backgroundColor: Colors.red[900],
-        title: Text(title,
-            style: const TextStyle(
-                color: Colors.white,
-                fontSize: 24,
-                fontWeight: FontWeight.bold)),
-        content: Text(body,
-            style: const TextStyle(color: Colors.white, fontSize: 18)),
+        title: Row(
+          children: [
+            const Icon(Icons.warning_amber_rounded,
+                color: Colors.white, size: 30),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '🚨 FIRE ALERT!',
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Type: $fireType',
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Location: $note',
+              style: const TextStyle(color: Colors.white, fontSize: 16),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Reported by: $triggeredBy',
+              style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.8), fontSize: 14),
+            ),
+          ],
+        ),
         actions: [
-          ElevatedButton(
-            onPressed: () {
-              WakelockPlus.disable();
-              Navigator.pop(context);
-            },
-            child: const Text("ACKNOWLEDGE"),
-          )
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              icon: const Icon(Icons.check_circle),
+              label: const Text("ACKNOWLEDGE",
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: Colors.red[900],
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+              onPressed: () {
+                WakelockPlus.disable();
+                Navigator.pop(context);
+              },
+            ),
+          ),
         ],
       ),
     );
@@ -122,16 +185,21 @@ class _HomeScreenState extends State<HomeScreen> {
         const SnackBar(
           backgroundColor: Colors.red,
           content: Text('🚨 ALARM POSTED TO STATION BOARD!'),
+          duration: Duration(seconds: 3),
         ),
       );
 
       _noteController.clear();
-      setState(() => _selectedFireType = null);
+      setState(() {
+        _selectedFireType = null;
+        _sliderKey = GlobalKey(); 
+      });
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to post alert: $e')),
       );
+      setState(() => _sliderKey = GlobalKey()); 
     }
   }
 
@@ -147,86 +215,108 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildControlCenter() {
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        children: [
-          const Text(
-            "SELECT FIRE TYPE",
-            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey),
-          ),
-          const SizedBox(height: 10),
-          Expanded(
-            child: GridView.count(
-              crossAxisCount: 2,
-              mainAxisSpacing: 12,
-              crossAxisSpacing: 12,
-              childAspectRatio: 1.3,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              children: [
-                _buildFireTile('Residential Fire', Icons.home, Colors.red),
-                _buildFireTile('Building Fire', Icons.apartment, Colors.orange),
-                _buildFireTile('Grass Fire', Icons.grass, Colors.green),
-              ],
-            ),
-          ),
-          TextField(
-            controller: _noteController,
-            decoration: const InputDecoration(
-              labelText: 'Location / Additional Notes',
-              hintText: 'e.g. Brgy 4, near the church',
-              border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.location_on),
-            ),
-          ),
-          const SizedBox(height: 20),
-          Center(
-            key: _sliderKey,
-            child: SliderButton(
-              action: () async {
-                if (_selectedFireType == null) {
-                  if (!mounted) return false;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                        content: Text("Please select a fire type first!")),
-                  );
-                  return false;
-                }
-                await _triggerAlarm();
-                if (!mounted) return true;
-                  setState(() {
-                    _sliderKey = GlobalKey();
-                  });
-                return true;
-              },
-              label: Text(
-                "Slide to Alarm All",
-                style: TextStyle(
-                    color: Colors.red[900],
-                    fontWeight: FontWeight.w500,
-                    fontSize: 17),
+  return Column(
+    children: [
+      // ← Scrollable top section
+      Expanded(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            children: [
+              const Text(
+                "SELECT FIRE TYPE",
+                style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey),
               ),
-              icon: const Icon(Icons.warning_amber_rounded,
-                  color: Colors.white, size: 30),
-              width: 270,
-              radius: 10,
-              buttonColor: Colors.red,
-              backgroundColor: Colors.red.withValues(alpha: 0.5),
-              highlightedColor: Colors.red,
-              baseColor: Colors.red,
-            ),
+              const SizedBox(height: 10),
+              GridView.count(
+                crossAxisCount: 2,
+                mainAxisSpacing: 12,
+                crossAxisSpacing: 12,
+                childAspectRatio: 1.3,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                children: [
+                  _buildFireTile('Residential Fire', Icons.home, Colors.red),
+                  _buildFireTile('Building Fire', Icons.apartment, Colors.orange),
+                  _buildFireTile('Grass Fire', Icons.grass, Colors.green),
+                ],
+              ),
+            ],
           ),
-        ],
+        ),
       ),
-    );
-  }
+
+      // ← Fixed bottom section
+      Container(
+        padding: const EdgeInsets.all(16.0),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.08),
+              blurRadius: 10,
+              offset: const Offset(0, -4),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _noteController,
+              decoration: const InputDecoration(
+                labelText: 'Location / Additional Notes',
+                hintText: 'e.g. Brgy 4, near the church',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.location_on),
+              ),
+            ),
+            const SizedBox(height: 16),
+            KeyedSubtree(
+              key: _sliderKey,
+              child: SliderButton(
+                action: () async {
+                  if (_selectedFireType == null) {
+                    if (!mounted) return false;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                          content: Text("Please select a fire type first!")),
+                    );
+                    return false;
+                  }
+                  await _triggerAlarm();
+                  return true;
+                },
+                label: Text(
+                  "Slide to Alarm All",
+                  style: TextStyle(
+                      color: Colors.red[900],
+                      fontWeight: FontWeight.w500,
+                      fontSize: 17),
+                ),
+                icon: const Icon(Icons.warning_amber_rounded,
+                    color: Colors.white, size: 30),
+                width: 270,
+                radius: 10,
+                buttonColor: Colors.red,
+                backgroundColor: Colors.red.withValues(alpha: 0.5),
+                highlightedColor: Colors.red,
+                baseColor: Colors.red,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ],
+  );
+}
 
   @override
   Widget build(BuildContext context) {
-    String displayName = (user?.displayName ?? user?.email?.split('@')[0] ?? 'User')
-    .split(' ')
-    .first;
+    String displayName =
+        (user?.displayName ?? user?.email?.split('@')[0] ?? 'User')
+            .split(' ')
+            .first;
 
     return Scaffold(
       appBar: AppBar(
