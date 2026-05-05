@@ -2,78 +2,16 @@ import 'package:bfp_final/firebase_options.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'services/notification_service.dart';
 import 'home.dart';
 import 'signup.dart';
-
-@pragma('vm:entry-point')
-Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  debugPrint("Handling background alert: ${message.messageId}");
-}
-
-final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
-    FlutterLocalNotificationsPlugin();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-
-  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
-
-  const AndroidNotificationChannel channel = AndroidNotificationChannel(
-    'high_importance_channel',
-    'Fire Alert Notifications',
-    description: 'This channel is used for high-priority BFP fire alerts.',
-    importance: Importance.max,
-    playSound: true,
-    enableVibration: true,
-    sound: RawResourceAndroidNotificationSound('alarm1'),
-  );
-
-  await flutterLocalNotificationsPlugin
-      .resolvePlatformSpecificImplementation<  // ← FIXED: added missing 
-          AndroidFlutterLocalNotificationsPlugin>()
-      ?.createNotificationChannel(channel);
-
-  const AndroidInitializationSettings androidSettings =
-      AndroidInitializationSettings('@mipmap/ic_launcher');
-  const InitializationSettings initSettings =
-      InitializationSettings(android: androidSettings);
-  await flutterLocalNotificationsPlugin.initialize(initSettings);
-
-  FirebaseMessaging messaging = FirebaseMessaging.instance;
-  await messaging.requestPermission(alert: true, sound: true, badge: true);
-  await messaging.subscribeToTopic('station_alerts');
-
-  FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-    final notification = message.notification;
-    final android = message.notification?.android;
-
-    if (notification != null && android != null) {
-      flutterLocalNotificationsPlugin.show(
-        notification.hashCode,
-        notification.title,
-        notification.body,
-        const NotificationDetails(
-          android: AndroidNotificationDetails(
-            'high_importance_channel',
-            'Fire Alert Notifications',
-            importance: Importance.max,
-            priority: Priority.max,
-            playSound: true,
-            sound: RawResourceAndroidNotificationSound('alarm1'),
-            enableVibration: true,
-            fullScreenIntent: true,
-          ),
-        ),
-      );
-    }
-  });
-
+  await NotificationService().initialize();
   runApp(const MyApp());
 }
 
@@ -97,9 +35,34 @@ class MyApp extends StatelessWidget {
             return const Scaffold(
                 body: Center(child: CircularProgressIndicator()));
           }
+
           if (snapshot.hasData) {
+            final user = snapshot.data!;
+
+            // ✅ Silently ensure every logged-in user has a Firestore doc.
+            // Covers old Google users who never got one written.
+            FirebaseFirestore.instance
+                .collection('users')
+                .doc(user.uid)
+                .get()
+                .then((doc) {
+              if (!doc.exists) {
+                FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(user.uid)
+                    .set({
+                  'uid': user.uid,
+                  'email': user.email ?? '',
+                  'displayName': user.displayName ?? '',
+                  'username': user.email?.split('@').first ?? '',
+                  'createdAt': FieldValue.serverTimestamp(),
+                });
+              }
+            });
+
             return const HomeScreen();
           }
+
           return const LoginPage();
         },
       ),
@@ -117,13 +80,16 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> {
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
+  bool _isLoading = false;
 
   Future<void> _handleGoogleLogin() async {
+    setState(() => _isLoading = true);
     try {
       final GoogleSignIn googleSignIn = GoogleSignIn();
-
       await googleSignIn.signOut();
-      await googleSignIn.disconnect().catchError((_) => null);
+      await googleSignIn.disconnect()
+          .timeout(const Duration(seconds: 3))
+          .catchError((_) => null);
 
       final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
       if (googleUser == null) return;
@@ -136,24 +102,64 @@ class _LoginPageState extends State<LoginPage> {
         idToken: googleAuth.idToken,
       );
 
-      await FirebaseAuth.instance.signInWithCredential(credential);
+      final UserCredential userCredential =
+          await FirebaseAuth.instance.signInWithCredential(credential);
+
+      final user = userCredential.user;
+
+     if (user != null) {
+      final userDoc = FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid);
+
+      final docSnapshot = await userDoc.get();
+
+      if (!docSnapshot.exists) {
+        // ✅ Generate a random username from their name + random 4-digit number
+        final baseName = (user.displayName ?? user.email?.split('@').first ?? 'user')
+            .toLowerCase()
+            .replaceAll(' ', '');
+        final randomSuffix = (1000 + (DateTime.now().millisecondsSinceEpoch % 9000)).toString();
+        final generatedUsername = '$baseName$randomSuffix';
+
+        await userDoc.set({
+          'uid': user.uid,
+          'email': user.email ?? '',
+          'displayName': user.displayName ?? '',
+          'username': generatedUsername, // e.g. "juandelacruz4821"
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      }
+    }
 
       if (!mounted) return;
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (context) => const HomeScreen()),
+        MaterialPageRoute(builder: (_) => const HomeScreen()),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Google Auth Error: $e')),
       );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
-  }
+}
 
   Future<void> _handleLogin() async {
-    String input = _emailController.text.trim();
-    String password = _passwordController.text.trim();
+    final String input = _emailController.text.trim();
+    final String password = _passwordController.text.trim();
+
+    if (input.isEmpty || password.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please fill in all fields')),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
     String emailToSignIn = input;
 
     try {
@@ -179,13 +185,15 @@ class _LoginPageState extends State<LoginPage> {
       if (!mounted) return;
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (context) => const HomeScreen()),
+        MaterialPageRoute(builder: (_) => const HomeScreen()),
       );
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(e.message ?? 'Auth Error')),
       );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -205,12 +213,11 @@ class _LoginPageState extends State<LoginPage> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 const Icon(Icons.local_fire_department,
-                    size: 100, color: Color.fromARGB(255, 183, 58, 58)),
+                    size: 100,
+                    color: Color.fromARGB(255, 183, 58, 58)),
                 const SizedBox(height: 30),
-                Text(
-                  'Welcome!',
-                  style: Theme.of(context).textTheme.headlineMedium,
-                ),
+                Text('Welcome!',
+                    style: Theme.of(context).textTheme.headlineMedium),
                 const SizedBox(height: 30),
                 TextField(
                   controller: _emailController,
@@ -235,12 +242,21 @@ class _LoginPageState extends State<LoginPage> {
                   width: double.infinity,
                   height: 50,
                   child: ElevatedButton(
-                    onPressed: _handleLogin,
+                    onPressed: _isLoading ? null : _handleLogin,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color.fromARGB(255, 183, 58, 58),
+                      backgroundColor:
+                          const Color.fromARGB(255, 183, 58, 58),
                       foregroundColor: Colors.white,
                     ),
-                    child: const Text('Login', style: TextStyle(fontSize: 18)),
+                    child: _isLoading
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(
+                                color: Colors.white, strokeWidth: 2),
+                          )
+                        : const Text('Login',
+                            style: TextStyle(fontSize: 18)),
                   ),
                 ),
                 const SizedBox(height: 15),
@@ -250,7 +266,7 @@ class _LoginPageState extends State<LoginPage> {
                   child: OutlinedButton.icon(
                     label: const Text('Continue with Google'),
                     icon: const Icon(Icons.account_circle),
-                    onPressed: _handleGoogleLogin,
+                    onPressed: _isLoading ? null : _handleGoogleLogin,
                     style: OutlinedButton.styleFrom(
                       side: const BorderSide(color: Colors.grey),
                     ),
@@ -266,17 +282,15 @@ class _LoginPageState extends State<LoginPage> {
                   children: [
                     const Text("Don't have an account?"),
                     TextButton(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (context) => const RegisterPage()),
-                        );
-                      },
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const RegisterPage()),
+                      ),
                       child: const Text('Sign Up'),
                     ),
                   ],
-                )
+                ),
               ],
             ),
           ),

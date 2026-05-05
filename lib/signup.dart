@@ -14,39 +14,62 @@ class _RegisterPageState extends State<RegisterPage> {
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _usernameController = TextEditingController();
   final FirebaseAuth _auth = FirebaseAuth.instance;
+  bool _isLoading = false;
 
   Future<void> _handleRegister() async {
-    String email = _emailController.text.trim();
-    String password = _passwordController.text.trim();
-    String username = _usernameController.text.trim();
+    final email = _emailController.text.trim();
+    final password = _passwordController.text.trim();
+    final username = _usernameController.text.trim();
+
+    if (email.isEmpty || password.isEmpty || username.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please fill in all fields')),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
 
     try {
-      if (email.isNotEmpty && password.isNotEmpty && username.isNotEmpty) {
-        UserCredential userCredential = await _auth.createUserWithEmailAndPassword(
-          email: email,
-          password: password,
-        );
+      final UserCredential userCredential =
+          await _auth.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
 
-        await userCredential.user?.updateDisplayName(username);
+      final user = userCredential.user!;
 
-        await FirebaseFirestore.instance.collection('users').doc(userCredential.user!.uid).set({
-          'username': username,
-          'email': email,
-          'uid': userCredential.user!.uid,
-        });
+      // FIX 2: Update display name then reload so currentUser?.displayName
+      // is immediately available without requiring a fresh login
+      await user.updateDisplayName(username);
+      await user.reload();
 
-        if (!mounted) return;
-        Navigator.pop(context);
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please fill in all fields')),
-        );
-      }
+      // FIX 1: Include displayName in Firestore so People tab shows names correctly
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .set({
+        'uid': user.uid,
+        'email': email,
+        'username': username,
+        'displayName': username, // ← was missing, chat_service reads this
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      if (!mounted) return;
+      Navigator.pop(context);
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message ?? 'Registration failed')),
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Registration failed: $e')),
       );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -93,12 +116,22 @@ class _RegisterPageState extends State<RegisterPage> {
                 width: double.infinity,
                 height: 50,
                 child: ElevatedButton(
-                  onPressed: _handleRegister,
+                  // FIX: disable button while registering to prevent double-tap
+                  onPressed: _isLoading ? null : _handleRegister,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color.fromARGB(255, 183, 58, 58),
+                    backgroundColor:
+                        const Color.fromARGB(255, 183, 58, 58),
                     foregroundColor: Colors.white,
                   ),
-                  child: const Text('Register', style: TextStyle(fontSize: 18)),
+                  child: _isLoading
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 2),
+                        )
+                      : const Text('Register',
+                          style: TextStyle(fontSize: 18)),
                 ),
               ),
             ],
