@@ -4,9 +4,10 @@ import 'package:slider_button/slider_button.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'messages_screen.dart';
 import 'main.dart';
-
-
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -21,56 +22,95 @@ class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _noteController = TextEditingController();
   final User? user = FirebaseAuth.instance.currentUser;
   GlobalKey _sliderKey = GlobalKey();
-
   String? _lastAlarmId;
+  final AudioPlayer _audioPlayer = AudioPlayer();
 
   @override
-  void initState() {
-    super.initState();
+void initState() {
+  super.initState();
 
-    FirebaseFirestore.instance
-        .collection('alarms')
-        .orderBy('timestamp', descending: true)
-        .limit(1)
-        .snapshots()
-        .listen((snapshot) {
-      if (!mounted) return;
-      if (snapshot.docs.isEmpty) return;
+  FirebaseFirestore.instance
+      .collection('alarms')
+      .orderBy('timestamp', descending: true)
+      .limit(1)
+      .snapshots()
+      .listen((snapshot) {
+    debugPrint('🔥 Snapshot received: ${snapshot.docs.length} docs');
 
-      final doc = snapshot.docs.first;
-      final data = doc.data();
-      final String alarmId = doc.id;
+    if (!mounted) return;
+    if (snapshot.docs.isEmpty) return;
 
-      if (alarmId == _lastAlarmId) return;
+    final doc = snapshot.docs.first;
+    final data = doc.data();
+    final String alarmId = doc.id;
 
-      final Timestamp? time = data['timestamp'] as Timestamp?;
-      if (time == null) return;
+    debugPrint('🔥 AlarmId: $alarmId, LastAlarmId: $_lastAlarmId');
 
-      final DateTime alarmTime = time.toDate();
-      final bool isRecent =
-          DateTime.now().difference(alarmTime).inSeconds < 30;
+    if (alarmId == _lastAlarmId) return;
 
-      final String triggeredBy = data['triggeredBy'] ?? '';
-      final String currentUser = user?.displayName ?? '';
-      final bool isOtherUser = triggeredBy != currentUser;
+    final Timestamp? time = data['timestamp'] as Timestamp?;
+    if (time == null) return;
 
-      if (isRecent && isOtherUser) {
-        _lastAlarmId = alarmId;
-        _ringPhone(
-          data['fireType'] ?? 'Unknown Fire',
-          data['note'] ?? 'No additional notes',
-          triggeredBy,
-        );
-      }
-    });
+    final DateTime alarmTime = time.toDate();
+    final bool isRecent =
+        DateTime.now().difference(alarmTime).inSeconds < 30;
+
+    final String triggeredBy = data['triggeredBy'] ?? '';
+    final String currentUser = user?.displayName ?? '';
+    final bool isOtherUser = triggeredBy != currentUser;
+
+    debugPrint('🔥 isRecent: $isRecent, isOtherUser: $isOtherUser');
+    debugPrint('🔥 triggeredBy: "$triggeredBy", currentUser: "$currentUser"');
+
+    if (isRecent && isOtherUser) {
+      _lastAlarmId = alarmId;
+      debugPrint('🔥 Calling _ringPhone!');
+      _ringPhone(
+        data['fireType'] ?? 'Unknown Fire',
+        data['note'] ?? 'No additional notes',
+        triggeredBy,
+      );
+    }
+  });
+
+  FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+    if (!mounted) return;
+    final data = message.data;
+    _showEmergencyOverlay(
+      data['fireType'] ?? 'Unknown Fire',
+      data['note'] ?? 'No additional notes',
+      data['triggeredBy'] ?? 'Unknown',
+    );
+  });
+
+  FirebaseMessaging.instance.getInitialMessage().then((message) {
+    if (message != null && mounted) {
+      final data = message.data;
+      _showEmergencyOverlay(
+        data['fireType'] ?? 'Unknown Fire',
+        data['note'] ?? 'No additional notes',
+        data['triggeredBy'] ?? 'Unknown',
+      );
+    }
+  });
+}
+
+Future<void> _ringPhone(
+    String fireType, String note, String triggeredBy) async {
+  WakelockPlus.enable();
+  await _audioPlayer.setVolume(1.0);
+  await _audioPlayer.setReleaseMode(ReleaseMode.loop);
+  await _audioPlayer.play(AssetSource('audio/alarm.mp3'));
+  _showEmergencyOverlay(fireType, note, triggeredBy);
+}
+  Future<void> _acknowledgeAlarm() async {
+    await _audioPlayer.stop();
+    WakelockPlus.disable();
+    if (!mounted) return;
+    Navigator.pop(context);
   }
-
-  void _ringPhone(String fireType, String note, String triggeredBy) {
-    WakelockPlus.enable();
-    _showEmergencyOverlay(fireType, note, triggeredBy);
-  }
-
-  void _showEmergencyOverlay(String fireType, String note, String triggeredBy) {
+  void _showEmergencyOverlay(
+      String fireType, String note, String triggeredBy) {
     if (!mounted) return;
     showDialog(
       context: context,
@@ -82,10 +122,10 @@ class _HomeScreenState extends State<HomeScreen> {
             const Icon(Icons.warning_amber_rounded,
                 color: Colors.white, size: 30),
             const SizedBox(width: 8),
-            Expanded(
+            const Expanded(
               child: Text(
                 '🚨 FIRE ALERT!',
-                style: const TextStyle(
+                style: TextStyle(
                     color: Colors.white,
                     fontSize: 22,
                     fontWeight: FontWeight.bold),
@@ -123,16 +163,14 @@ class _HomeScreenState extends State<HomeScreen> {
             child: ElevatedButton.icon(
               icon: const Icon(Icons.check_circle),
               label: const Text("ACKNOWLEDGE",
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  style:
+                      TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.white,
                 foregroundColor: Colors.red[900],
                 padding: const EdgeInsets.symmetric(vertical: 12),
               ),
-              onPressed: () {
-                WakelockPlus.disable();
-                Navigator.pop(context);
-              },
+              onPressed: _acknowledgeAlarm,
             ),
           ),
         ],
@@ -192,18 +230,19 @@ class _HomeScreenState extends State<HomeScreen> {
       _noteController.clear();
       setState(() {
         _selectedFireType = null;
-        _sliderKey = GlobalKey(); 
+        _sliderKey = GlobalKey();
       });
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to post alert: $e')),
       );
-      setState(() => _sliderKey = GlobalKey()); 
+      setState(() => _sliderKey = GlobalKey());
     }
   }
 
   Future<void> _handleLogout() async {
+    await _audioPlayer.stop();
     await FirebaseAuth.instance.signOut();
     await GoogleSignIn().signOut();
 
@@ -215,101 +254,101 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildControlCenter() {
-  return Column(
-    children: [
-      // ← Scrollable top section
-      Expanded(
-        child: SingleChildScrollView(
+    return Column(
+      children: [
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              children: [
+                const Text(
+                  "SELECT FIRE TYPE",
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold, color: Colors.grey),
+                ),
+                const SizedBox(height: 10),
+                GridView.count(
+                  crossAxisCount: 2,
+                  mainAxisSpacing: 12,
+                  crossAxisSpacing: 12,
+                  childAspectRatio: 1.3,
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  children: [
+                    _buildFireTile('Residential Fire', Icons.home, Colors.red),
+                    _buildFireTile(
+                        'Building Fire', Icons.apartment, Colors.orange),
+                    _buildFireTile('Grass Fire', Icons.grass, Colors.green),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        Container(
           padding: const EdgeInsets.all(16.0),
-          child: Column(
-            children: [
-              const Text(
-                "SELECT FIRE TYPE",
-                style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.08),
+                blurRadius: 10,
+                offset: const Offset(0, -4),
               ),
-              const SizedBox(height: 10),
-              GridView.count(
-                crossAxisCount: 2,
-                mainAxisSpacing: 12,
-                crossAxisSpacing: 12,
-                childAspectRatio: 1.3,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                children: [
-                  _buildFireTile('Residential Fire', Icons.home, Colors.red),
-                  _buildFireTile('Building Fire', Icons.apartment, Colors.orange),
-                  _buildFireTile('Grass Fire', Icons.grass, Colors.green),
-                ],
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: _noteController,
+                decoration: const InputDecoration(
+                  labelText: 'Location / Additional Notes',
+                  hintText: 'e.g. Brgy 4, near the church',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.location_on),
+                ),
+              ),
+              const SizedBox(height: 16),
+              KeyedSubtree(
+                key: _sliderKey,
+                child: SliderButton(
+                  action: () async {
+                    if (_selectedFireType == null) {
+                      if (!mounted) return false;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                            content:
+                                Text("Please select a fire type first!")),
+                      );
+                      return false;
+                    }
+                    await _triggerAlarm();
+                    return true;
+                  },
+                  label: Text(
+                    "Slide to Alarm All",
+                    style: TextStyle(
+                        color: Colors.red[900],
+                        fontWeight: FontWeight.w500,
+                        fontSize: 17),
+                  ),
+                  icon: const Icon(Icons.warning_amber_rounded,
+                      color: Colors.white, size: 30),
+                  width: 270,
+                  radius: 10,
+                  buttonColor: Colors.red,
+                  backgroundColor: Colors.red.withValues(alpha: 0.5),
+                  highlightedColor: Colors.red,
+                  baseColor: Colors.red,
+                ),
               ),
             ],
           ),
         ),
-      ),
-
-      // ← Fixed bottom section
-      Container(
-        padding: const EdgeInsets.all(16.0),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.08),
-              blurRadius: 10,
-              offset: const Offset(0, -4),
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: _noteController,
-              decoration: const InputDecoration(
-                labelText: 'Location / Additional Notes',
-                hintText: 'e.g. Brgy 4, near the church',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.location_on),
-              ),
-            ),
-            const SizedBox(height: 16),
-            KeyedSubtree(
-              key: _sliderKey,
-              child: SliderButton(
-                action: () async {
-                  if (_selectedFireType == null) {
-                    if (!mounted) return false;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                          content: Text("Please select a fire type first!")),
-                    );
-                    return false;
-                  }
-                  await _triggerAlarm();
-                  return true;
-                },
-                label: Text(
-                  "Slide to Alarm All",
-                  style: TextStyle(
-                      color: Colors.red[900],
-                      fontWeight: FontWeight.w500,
-                      fontSize: 17),
-                ),
-                icon: const Icon(Icons.warning_amber_rounded,
-                    color: Colors.white, size: 30),
-                width: 270,
-                radius: 10,
-                buttonColor: Colors.red,
-                backgroundColor: Colors.red.withValues(alpha: 0.5),
-                highlightedColor: Colors.red,
-                baseColor: Colors.red,
-              ),
-            ),
-          ],
-        ),
-      ),
-    ],
-  );
-}
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -343,8 +382,8 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
       body: _selectedIndex == 0
-          ? _buildControlCenter()
-          : const Center(child: Text("Messages")),
+        ? _buildControlCenter()
+        : const MessagesScreen(),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         onTap: (index) => setState(() => _selectedIndex = index),
@@ -359,6 +398,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _audioPlayer.dispose();
     _noteController.dispose();
     super.dispose();
   }
