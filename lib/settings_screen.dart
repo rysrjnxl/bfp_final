@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'services/account_settings.dart';
+import 'services/alarm_history.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -104,28 +106,24 @@ class SettingsScreen extends StatelessWidget {
           icon: Icons.account_circle,
           label: 'Account Settings',
           subtitle: 'Account info',
-          onTap: () {},
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const AccountSettingsPage()),
+            );
+          },
         ),
         _buildOption(
           context,
           icon: Icons.history,
           label: 'Alarm History',
           subtitle: 'View past fire alerts',
-          onTap: () {},
-        ),
-        _buildOption(
-          context,
-          icon: Icons.people,
-          label: 'Personnel',
-          subtitle: 'View station personnel',
-          onTap: () {},
-        ),
-        _buildOption(
-          context,
-          icon: Icons.bar_chart,
-          label: 'Reports',
-          subtitle: 'View incident reports',
-          onTap: () {},
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const AlarmHistoryPage()),
+            );
+          },
         ),
         _buildOption(
           context,

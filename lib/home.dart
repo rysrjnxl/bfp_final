@@ -29,6 +29,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // — Controllers & Services
   final TextEditingController _noteController = TextEditingController();
+  final TextEditingController _locationController = TextEditingController();
   final AudioPlayer _audioPlayer = AudioPlayer();
   final AlarmService _alarmService = AlarmService();
   final User? user = FirebaseAuth.instance.currentUser;
@@ -138,27 +139,29 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _triggerAlarm() async {
-    try {
-      await _alarmService.triggerAlarm(
-        fireType: _selectedFireType!,
-        note: _noteController.text,
-      );
+  try {
+    await _alarmService.triggerAlarm(
+      fireType: _selectedFireType!,
+      location: _locationController.text, // UPDATED
+      note: _noteController.text,         // UPDATED
+    );
 
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          backgroundColor: Colors.red,
-          content: Text('🚨 ALARM POSTED TO STATION BOARD!'),
-          duration: Duration(seconds: 3),
-        ),
-      );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        backgroundColor: Colors.red,
+        content: Text('🚨 ALARM POSTED TO STATION BOARD!'),
+        duration: Duration(seconds: 3),
+      ),
+    );
 
-      _noteController.clear();
-      setState(() {
-        _selectedFireType = null;
-        _sliderKey = GlobalKey();
-      });
-    } catch (e) {
+    _noteController.clear();
+    _locationController.clear(); // NEW[cite: 2]
+    setState(() {
+      _selectedFireType = null;
+      _sliderKey = GlobalKey();
+    });
+  } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to post alert: $e')),
@@ -305,6 +308,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         ),
+        // Bottom Input and Action Section
         Container(
           padding: const EdgeInsets.all(16.0),
           decoration: BoxDecoration(
@@ -320,20 +324,35 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // 📍 FIRE LOCATION FIELD
+              TextField(
+                controller: _locationController,
+                decoration: const InputDecoration(
+                  labelText: 'Fire Location',
+                  hintText: 'e.g. Brgy 4, near the church',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.location_on, color: Colors.red),
+                ),
+              ),
+              const SizedBox(height: 12),
+              
+              // 📝 ADDITIONAL NOTES FIELD
               TextField(
                 controller: _noteController,
                 decoration: const InputDecoration(
-                  labelText: 'Location / Additional Notes',
-                  hintText: 'e.g. Brgy 4, near the church',
+                  labelText: 'Additional Notes (Optional)',
+                  hintText: 'e.g. 2nd floor, casualties reported',
                   border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.location_on),
+                  prefixIcon: Icon(Icons.notes),
                 ),
               ),
               const SizedBox(height: 16),
+
               KeyedSubtree(
                 key: _sliderKey,
                 child: SliderButton(
                   action: () async {
+                    // Validation: Ensure Fire Type is selected
                     if (_selectedFireType == null) {
                       if (!mounted) return false;
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -342,15 +361,17 @@ class _HomeScreenState extends State<HomeScreen> {
                       );
                       return false;
                     }
-                    // ✅ Added: require location/note before allowing slide
-                    if (_noteController.text.trim().isEmpty) {
+                    
+                    // Validation: Ensure Location is provided[cite: 2]
+                    if (_locationController.text.trim().isEmpty) {
                       if (!mounted) return false;
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
-                            content: Text("Please enter a location or additional notes!")),
+                            content: Text("Please enter the fire location!")),
                       );
                       return false;
                     }
+
                     await _triggerAlarm();
                     return true;
                   },
