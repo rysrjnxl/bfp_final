@@ -99,6 +99,13 @@ class SettingsScreen extends StatelessWidget {
         ),
 
         // Options
+         _buildOption(
+          context,
+          icon: Icons.account_circle,
+          label: 'Account Settings',
+          subtitle: 'Account info',
+          onTap: () {},
+        ),
         _buildOption(
           context,
           icon: Icons.history,
