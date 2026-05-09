@@ -139,7 +139,9 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
                       border: const OutlineInputBorder(),
                       prefixIcon: const Icon(Icons.person_outline),
                       filled: !_isEditingName,
-                      fillColor: _isEditingName ? Colors.transparent : Colors.grey[200],
+                      fillColor: _isEditingName 
+                        ? Colors.transparent 
+                        : Theme.of(context).colorScheme.surfaceContainerHighest,
                     ),
                   ),
                 ),
@@ -174,7 +176,9 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
                       border: const OutlineInputBorder(),
                       prefixIcon: const Icon(Icons.lock_outline),
                       filled: !_isEditingPassword,
-                      fillColor: _isEditingPassword ? Colors.transparent : Colors.grey[200],
+                      fillColor: _isEditingName 
+                        ? Colors.transparent 
+                        : Theme.of(context).colorScheme.surfaceContainerHighest,
                     ),
                   ),
                 ),

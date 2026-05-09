@@ -36,23 +36,26 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
 
       // Light theme
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color.fromARGB(255, 183, 58, 58)),
-        useMaterial3: true,
-      ),
-
-      // Dark theme
-      darkTheme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color.fromARGB(255, 183, 58, 58),
-            brightness: Brightness.dark),
-        useMaterial3: true,
-      ),
-
-      // Driven by the provider — this is what makes the toggle work
-      themeMode: settings.themeMode,
-
+      themeMode: settings.themeMode, // Controlled by your Provider
+  
+  // LIGHT THEME
+  theme: ThemeData(
+    useMaterial3: true,
+    colorScheme: ColorScheme.fromSeed(
+      seedColor: const Color.fromARGB(255, 183, 58, 58),
+      brightness: Brightness.light,
+    ),
+  ),
+  
+  // DARK THEME
+  darkTheme: ThemeData(
+    useMaterial3: true,
+    colorScheme: ColorScheme.fromSeed(
+      seedColor: const Color.fromARGB(255, 183, 58, 58),
+      brightness: Brightness.dark,
+    ),
+  ),
+  
       home: StreamBuilder<User?>(
         stream: FirebaseAuth.instance.authStateChanges(),
         builder: (context, snapshot) {

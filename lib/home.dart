@@ -106,7 +106,6 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  // FIX 1: Added missing 'location' argument to match _showEmergencyOverlay's 4-param signature
   void _showAlertFromData(Map<String, dynamic> data) {
     _showEmergencyOverlay(
       data['fireType'] ?? 'Unknown Fire',
@@ -115,8 +114,6 @@ class _HomeScreenState extends State<HomeScreen> {
       data['triggeredBy'] ?? 'Unknown',
     );
   }
-
-  // — Alarm Actions
 
   Future<void> _ringPhone(
       String fireType, String location, String note, String triggeredBy) async {
@@ -318,14 +315,16 @@ class _HomeScreenState extends State<HomeScreen> {
         Container(
           padding: const EdgeInsets.all(16.0),
           decoration: BoxDecoration(
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.08),
-                blurRadius: 10,
-                offset: const Offset(0, -4),
-              ),
-            ],
-          ),
+            color: Theme.of(context).colorScheme.surface, 
+          boxShadow: [
+            BoxShadow(
+              // FIX: Make shadow subtler in dark mode
+              color: Colors.black.withValues(alpha: 0.1),
+              blurRadius: 10,
+              offset: const Offset(0, -4),
+            ),
+          ],
+        ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -378,12 +377,12 @@ class _HomeScreenState extends State<HomeScreen> {
                     await _triggerAlarm();
                     return true;
                   },
-                  label: Text(
-                    "Slide to Alarm All",
+                  label: DefaultTextStyle.merge(
                     style: TextStyle(
-                        color: const Color.fromARGB(255, 0, 0, 0),
-                        fontWeight: FontWeight.w500,
-                        fontSize: 17),
+                      color: const Color.fromARGB(255, 237, 86, 86),
+                      fontWeight: FontWeight.w500,
+                      fontSize: 17),
+                    child: const Text("Slide to Alarm All"),
                   ),
                   icon: const Icon(Icons.warning_amber_rounded,
                       color: Colors.white, size: 30),

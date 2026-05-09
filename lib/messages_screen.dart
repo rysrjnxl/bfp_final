@@ -52,7 +52,7 @@ class _MessagesScreenState extends State<MessagesScreen>
             child: TabBar(
               controller: _tabController!,
               indicatorColor: const Color.fromARGB(255, 183, 58, 58),
-              labelColor: const Color.fromARGB(255, 183, 58, 58),
+              labelColor: Colors.white,
               unselectedLabelColor: Colors.grey,
               tabs: const [
                 Tab(text: 'Chats'),
