@@ -6,12 +6,14 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:provider/provider.dart';
 import 'dart:async';
 import 'services/alarm_service.dart';
 import 'widgets/fire_tile.dart';
 import 'messages_screen.dart';
 import 'main.dart';
 import 'settings_screen.dart';
+import 'services/settings_provider.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -34,7 +36,6 @@ class _HomeScreenState extends State<HomeScreen> {
   final AlarmService _alarmService = AlarmService();
   final User? user = FirebaseAuth.instance.currentUser;
 
-  // ✅ Store subscriptions so they can be cancelled on logout/dispose
   StreamSubscription? _alarmsSubscription;
   StreamSubscription? _fcmOpenedSubscription;
 
@@ -54,7 +55,6 @@ class _HomeScreenState extends State<HomeScreen> {
   // — Listeners
 
   void _listenForAlarms() {
-    // ✅ Store subscription so we can cancel it on logout/dispose
     _alarmsSubscription = FirebaseFirestore.instance
         .collection('alarms')
         .orderBy('timestamp', descending: true)
@@ -76,19 +76,18 @@ class _HomeScreenState extends State<HomeScreen> {
         final bool isRecent =
             DateTime.now().difference(time.toDate()).inSeconds < 30;
         final String triggeredBy = data['triggeredBy'] ?? '';
-        final bool isOtherUser =
-            triggeredBy != (user?.displayName ?? '');
+        final bool isOtherUser = triggeredBy != (user?.displayName ?? '');
 
         if (isRecent && isOtherUser) {
           _lastAlarmId = alarmId;
           _ringPhone(
             data['fireType'] ?? 'Unknown Fire',
+            data['location'] ?? 'Unknown Location',
             data['note'] ?? 'No additional notes',
             triggeredBy,
           );
         }
       },
-      // ✅ Handle permission errors gracefully instead of crashing
       onError: (error) {
         debugPrint('Alarms stream error: $error');
       },
@@ -96,7 +95,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _listenForFCMMessages() {
-    // ✅ Store subscription so we can cancel it on dispose
     _fcmOpenedSubscription =
         FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
       if (!mounted) return;
@@ -108,9 +106,11 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  // FIX 1: Added missing 'location' argument to match _showEmergencyOverlay's 4-param signature
   void _showAlertFromData(Map<String, dynamic> data) {
     _showEmergencyOverlay(
       data['fireType'] ?? 'Unknown Fire',
+      data['location'] ?? 'Unknown Location',
       data['note'] ?? 'No additional notes',
       data['triggeredBy'] ?? 'Unknown',
     );
@@ -119,16 +119,21 @@ class _HomeScreenState extends State<HomeScreen> {
   // — Alarm Actions
 
   Future<void> _ringPhone(
-      String fireType, String note, String triggeredBy) async {
+      String fireType, String location, String note, String triggeredBy) async {
     WakelockPlus.enable();
+
     try {
+      final settings = Provider.of<SettingsProvider>(context, listen: false);
+      final String selectedSound = settings.alarmSound;
+
       await _audioPlayer.setVolume(1.0);
       await _audioPlayer.setReleaseMode(ReleaseMode.loop);
-      await _audioPlayer.play(AssetSource('audio/alarm.mp3'));
+      await _audioPlayer.play(AssetSource('audio/$selectedSound'));
     } catch (e) {
       debugPrint('🔊 Audio error: $e');
     }
-    _showEmergencyOverlay(fireType, note, triggeredBy);
+
+    _showEmergencyOverlay(fireType, location, note, triggeredBy);
   }
 
   Future<void> _acknowledgeAlarm() async {
@@ -139,29 +144,29 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _triggerAlarm() async {
-  try {
-    await _alarmService.triggerAlarm(
-      fireType: _selectedFireType!,
-      location: _locationController.text, // UPDATED
-      note: _noteController.text,         // UPDATED
-    );
+    try {
+      await _alarmService.triggerAlarm(
+        fireType: _selectedFireType!,
+        location: _locationController.text,
+        note: _noteController.text,
+      );
 
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        backgroundColor: Colors.red,
-        content: Text('🚨 ALARM POSTED TO STATION BOARD!'),
-        duration: Duration(seconds: 3),
-      ),
-    );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: Colors.red,
+          content: Text('🚨 ALARM POSTED TO STATION BOARD!'),
+          duration: Duration(seconds: 3),
+        ),
+      );
 
-    _noteController.clear();
-    _locationController.clear(); // NEW[cite: 2]
-    setState(() {
-      _selectedFireType = null;
-      _sliderKey = GlobalKey();
-    });
-  } catch (e) {
+      _noteController.clear();
+      _locationController.clear();
+      setState(() {
+        _selectedFireType = null;
+        _sliderKey = GlobalKey();
+      });
+    } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to post alert: $e')),
@@ -171,8 +176,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _handleLogout() async {
-    // ✅ Cancel streams BEFORE signing out so they don't fire
-    // with null auth and trigger PERMISSION_DENIED crashes
     await _alarmsSubscription?.cancel();
     await _fcmOpenedSubscription?.cancel();
 
@@ -190,8 +193,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // — Dialogs
 
+  // FIX 2: Added 'location' parameter; now correctly displays location and note separately
   void _showEmergencyOverlay(
-      String fireType, String note, String triggeredBy) {
+      String fireType, String location, String note, String triggeredBy) {
     if (!mounted) return;
     showDialog(
       context: context,
@@ -223,14 +227,17 @@ class _HomeScreenState extends State<HomeScreen> {
                     fontSize: 18,
                     fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
-            Text('Location: $note',
-                style:
-                    const TextStyle(color: Colors.white, fontSize: 16)),
+            Text('Location: $location', // FIX: was incorrectly showing $note here
+                style: const TextStyle(color: Colors.white, fontSize: 16)),
             const SizedBox(height: 8),
+            if (note.isNotEmpty) ...[
+              Text('Note: $note',
+                  style: const TextStyle(color: Colors.white, fontSize: 14)),
+              const SizedBox(height: 8),
+            ],
             Text('Reported by: $triggeredBy',
                 style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.8),
-                    fontSize: 14)),
+                    color: Colors.white.withValues(alpha: 0.8), fontSize: 14)),
           ],
         ),
         actions: [
@@ -239,8 +246,7 @@ class _HomeScreenState extends State<HomeScreen> {
             child: ElevatedButton.icon(
               icon: const Icon(Icons.check_circle),
               label: const Text("ACKNOWLEDGE",
-                  style: TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.bold)),
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.white,
                 foregroundColor: Colors.red[900],
@@ -266,8 +272,8 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 const Text(
                   "SELECT FIRE TYPE",
-                  style: TextStyle(
-                      fontWeight: FontWeight.bold, color: Colors.grey),
+                  style:
+                      TextStyle(fontWeight: FontWeight.bold, color: Colors.grey),
                 ),
                 const SizedBox(height: 10),
                 GridView.count(
@@ -283,16 +289,16 @@ class _HomeScreenState extends State<HomeScreen> {
                       icon: Icons.home,
                       color: Colors.red,
                       isSelected: _selectedFireType == 'Residential Fire',
-                      onTap: () => setState(
-                          () => _selectedFireType = 'Residential Fire'),
+                      onTap: () =>
+                          setState(() => _selectedFireType = 'Residential Fire'),
                     ),
                     FireTile(
                       label: 'Building Fire',
                       icon: Icons.apartment,
                       color: Colors.orange,
                       isSelected: _selectedFireType == 'Building Fire',
-                      onTap: () => setState(
-                          () => _selectedFireType = 'Building Fire'),
+                      onTap: () =>
+                          setState(() => _selectedFireType = 'Building Fire'),
                     ),
                     FireTile(
                       label: 'Grass Fire',
@@ -312,7 +318,6 @@ class _HomeScreenState extends State<HomeScreen> {
         Container(
           padding: const EdgeInsets.all(16.0),
           decoration: BoxDecoration(
-            color: Colors.white,
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withValues(alpha: 0.08),
@@ -335,13 +340,13 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               const SizedBox(height: 12),
-              
+
               // 📝 ADDITIONAL NOTES FIELD
               TextField(
                 controller: _noteController,
                 decoration: const InputDecoration(
                   labelText: 'Additional Notes (Optional)',
-                  hintText: 'e.g. 2nd floor, casualties reported',
+                  hintText: 'Note/Description',
                   border: OutlineInputBorder(),
                   prefixIcon: Icon(Icons.notes),
                 ),
@@ -352,7 +357,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 key: _sliderKey,
                 child: SliderButton(
                   action: () async {
-                    // Validation: Ensure Fire Type is selected
                     if (_selectedFireType == null) {
                       if (!mounted) return false;
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -361,8 +365,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       );
                       return false;
                     }
-                    
-                    // Validation: Ensure Location is provided[cite: 2]
+
                     if (_locationController.text.trim().isEmpty) {
                       if (!mounted) return false;
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -378,7 +381,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   label: Text(
                     "Slide to Alarm All",
                     style: TextStyle(
-                        color: Colors.red[900],
+                        color: const Color.fromARGB(255, 0, 0, 0),
                         fontWeight: FontWeight.w500,
                         fontSize: 17),
                   ),
@@ -431,8 +434,7 @@ class _HomeScreenState extends State<HomeScreen> {
         onTap: (index) => setState(() => _selectedIndex = index),
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.message), label: 'Chats'),
+          BottomNavigationBarItem(icon: Icon(Icons.message), label: 'Chats'),
           BottomNavigationBarItem(
               icon: Icon(Icons.settings), label: 'Settings'),
         ],
@@ -442,7 +444,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
-    // ✅ Always cancel subscriptions on dispose
     _alarmsSubscription?.cancel();
     _fcmOpenedSubscription?.cancel();
     _audioPlayer.dispose();

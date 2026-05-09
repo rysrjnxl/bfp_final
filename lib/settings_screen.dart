@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'services/account_settings.dart';
 import 'services/alarm_history.dart';
+import 'app_settings_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -130,7 +131,12 @@ class SettingsScreen extends StatelessWidget {
           icon: Icons.settings,
           label: 'App Settings',
           subtitle: 'App preferences',
-          onTap: () {},
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const AppSettingsScreen()),
+            );
+            },
         ),
       ],
     );

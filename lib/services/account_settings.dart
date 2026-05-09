@@ -38,6 +38,7 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
       );
     }
   }
+  
 
   Future<void> _updatePassword() async {
     User? currentUser = FirebaseAuth.instance.currentUser;

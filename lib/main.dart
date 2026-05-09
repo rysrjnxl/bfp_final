@@ -4,7 +4,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'services/notification_service.dart';
+import 'services/settings_provider.dart';
 import 'home.dart';
 import 'signup.dart';
 
@@ -12,7 +14,13 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   await NotificationService().initialize();
-  runApp(const MyApp());
+
+  runApp(
+    ChangeNotifierProvider(
+      create: (_) => SettingsProvider(),
+      child: const MyApp(),
+    ),
+  );
 }
 
 class MyApp extends StatelessWidget {
@@ -20,14 +28,31 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Listen to SettingsProvider so app rebuilds when theme changes
+    final settings = Provider.of<SettingsProvider>(context);
+
     return MaterialApp(
       title: 'BFP Fire Out',
       debugShowCheckedModeBanner: false,
+
+      // Light theme
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
             seedColor: const Color.fromARGB(255, 183, 58, 58)),
         useMaterial3: true,
       ),
+
+      // Dark theme
+      darkTheme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(
+            seedColor: const Color.fromARGB(255, 183, 58, 58),
+            brightness: Brightness.dark),
+        useMaterial3: true,
+      ),
+
+      // Driven by the provider — this is what makes the toggle work
+      themeMode: settings.themeMode,
+
       home: StreamBuilder<User?>(
         stream: FirebaseAuth.instance.authStateChanges(),
         builder: (context, snapshot) {
@@ -39,8 +64,6 @@ class MyApp extends StatelessWidget {
           if (snapshot.hasData) {
             final user = snapshot.data!;
 
-            // ✅ Silently ensure every logged-in user has a Firestore doc.
-            // Covers old Google users who never got one written.
             FirebaseFirestore.instance
                 .collection('users')
                 .doc(user.uid)
@@ -87,7 +110,8 @@ class _LoginPageState extends State<LoginPage> {
     try {
       final GoogleSignIn googleSignIn = GoogleSignIn();
       await googleSignIn.signOut();
-      await googleSignIn.disconnect()
+      await googleSignIn
+          .disconnect()
           .timeout(const Duration(seconds: 3))
           .catchError((_) => null);
 
@@ -107,30 +131,31 @@ class _LoginPageState extends State<LoginPage> {
 
       final user = userCredential.user;
 
-     if (user != null) {
-      final userDoc = FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid);
+      if (user != null) {
+        final userDoc =
+            FirebaseFirestore.instance.collection('users').doc(user.uid);
 
-      final docSnapshot = await userDoc.get();
+        final docSnapshot = await userDoc.get();
 
-      if (!docSnapshot.exists) {
-        // ✅ Generate a random username from their name + random 4-digit number
-        final baseName = (user.displayName ?? user.email?.split('@').first ?? 'user')
-            .toLowerCase()
-            .replaceAll(' ', '');
-        final randomSuffix = (1000 + (DateTime.now().millisecondsSinceEpoch % 9000)).toString();
-        final generatedUsername = '$baseName$randomSuffix';
+        if (!docSnapshot.exists) {
+          final baseName =
+              (user.displayName ?? user.email?.split('@').first ?? 'user')
+                  .toLowerCase()
+                  .replaceAll(' ', '');
+          final randomSuffix =
+              (1000 + (DateTime.now().millisecondsSinceEpoch % 9000))
+                  .toString();
+          final generatedUsername = '$baseName$randomSuffix';
 
-        await userDoc.set({
-          'uid': user.uid,
-          'email': user.email ?? '',
-          'displayName': user.displayName ?? '',
-          'username': generatedUsername, // e.g. "juandelacruz4821"
-          'createdAt': FieldValue.serverTimestamp(),
-        });
+          await userDoc.set({
+            'uid': user.uid,
+            'email': user.email ?? '',
+            'displayName': user.displayName ?? '',
+            'username': generatedUsername,
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+        }
       }
-    }
 
       if (!mounted) return;
       Navigator.pushReplacement(
@@ -145,7 +170,7 @@ class _LoginPageState extends State<LoginPage> {
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
-}
+  }
 
   Future<void> _handleLogin() async {
     final String input = _emailController.text.trim();
@@ -213,8 +238,7 @@ class _LoginPageState extends State<LoginPage> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 const Icon(Icons.local_fire_department,
-                    size: 100,
-                    color: Color.fromARGB(255, 183, 58, 58)),
+                    size: 100, color: Color.fromARGB(255, 183, 58, 58)),
                 const SizedBox(height: 30),
                 Text('Welcome!',
                     style: Theme.of(context).textTheme.headlineMedium),
@@ -244,8 +268,7 @@ class _LoginPageState extends State<LoginPage> {
                   child: ElevatedButton(
                     onPressed: _isLoading ? null : _handleLogin,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor:
-                          const Color.fromARGB(255, 183, 58, 58),
+                      backgroundColor: const Color.fromARGB(255, 183, 58, 58),
                       foregroundColor: Colors.white,
                     ),
                     child: _isLoading
@@ -255,8 +278,7 @@ class _LoginPageState extends State<LoginPage> {
                             child: CircularProgressIndicator(
                                 color: Colors.white, strokeWidth: 2),
                           )
-                        : const Text('Login',
-                            style: TextStyle(fontSize: 18)),
+                        : const Text('Login', style: TextStyle(fontSize: 18)),
                   ),
                 ),
                 const SizedBox(height: 15),
