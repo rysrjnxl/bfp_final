@@ -7,9 +7,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:provider/provider.dart';
+import 'package:latlong2/latlong.dart';
 import 'dart:async';
 import 'services/alarm_service.dart';
 import 'widgets/fire_tile.dart';
+import 'widgets/map_picker.dart';
 import 'messages_screen.dart';
 import 'main.dart';
 import 'settings_screen.dart';
@@ -23,13 +25,12 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  // — State
   int _selectedIndex = 0;
   String? _selectedFireType;
   String? _lastAlarmId;
   GlobalKey _sliderKey = GlobalKey();
+  LatLng? _pickedLatLng; // stores the dropped pin coordinates
 
-  // — Controllers & Services
   final TextEditingController _noteController = TextEditingController();
   final TextEditingController _locationController = TextEditingController();
   final AudioPlayer _audioPlayer = AudioPlayer();
@@ -39,7 +40,6 @@ class _HomeScreenState extends State<HomeScreen> {
   StreamSubscription? _alarmsSubscription;
   StreamSubscription? _fcmOpenedSubscription;
 
-  // — Computed
   String get _displayName =>
       (user?.displayName ?? user?.email?.split('@')[0] ?? 'User')
           .split(' ')
@@ -51,8 +51,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _listenForAlarms();
     _listenForFCMMessages();
   }
-
-  // — Listeners
 
   void _listenForAlarms() {
     _alarmsSubscription = FirebaseFirestore.instance
@@ -161,6 +159,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _locationController.clear();
       setState(() {
         _selectedFireType = null;
+        _pickedLatLng = null;
         _sliderKey = GlobalKey();
       });
     } catch (e) {
@@ -188,9 +187,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // — Dialogs
-
-  // FIX 2: Added 'location' parameter; now correctly displays location and note separately
   void _showEmergencyOverlay(
       String fireType, String location, String note, String triggeredBy) {
     if (!mounted) return;
@@ -224,7 +220,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     fontSize: 18,
                     fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
-            Text('Location: $location', // FIX: was incorrectly showing $note here
+            Text('Location: $location',
                 style: const TextStyle(color: Colors.white, fontSize: 16)),
             const SizedBox(height: 8),
             if (note.isNotEmpty) ...[
@@ -257,9 +253,9 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // — Builders
-
   Widget _buildControlCenter() {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Column(
       children: [
         Expanded(
@@ -269,8 +265,8 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 const Text(
                   "SELECT FIRE TYPE",
-                  style:
-                      TextStyle(fontWeight: FontWeight.bold, color: Colors.grey),
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold, color: Colors.grey),
                 ),
                 const SizedBox(height: 10),
                 GridView.count(
@@ -286,8 +282,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       icon: Icons.home,
                       color: Colors.red,
                       isSelected: _selectedFireType == 'Residential Fire',
-                      onTap: () =>
-                          setState(() => _selectedFireType = 'Residential Fire'),
+                      onTap: () => setState(
+                          () => _selectedFireType = 'Residential Fire'),
                     ),
                     FireTile(
                       label: 'Building Fire',
@@ -311,31 +307,53 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         ),
-        // Bottom Input and Action Section
         Container(
           padding: const EdgeInsets.all(16.0),
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surface, 
-          boxShadow: [
-            BoxShadow(
-              // FIX: Make shadow subtler in dark mode
-              color: Colors.black.withValues(alpha: 0.1),
-              blurRadius: 10,
-              offset: const Offset(0, -4),
-            ),
-          ],
-        ),
+            color: colorScheme.surface,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.1),
+                blurRadius: 10,
+                offset: const Offset(0, -4),
+              ),
+            ],
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // 📍 FIRE LOCATION FIELD
-              TextField(
-                controller: _locationController,
-                decoration: const InputDecoration(
-                  labelText: 'Fire Location',
-                  hintText: 'e.g. Brgy 4, near the church',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.location_on, color: Colors.red),
+              // 📍 FIRE LOCATION — taps open the map picker
+              GestureDetector(
+                onTap: () async {
+                  final LatLng? result = await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const MapPickerScreen()),
+                  );
+                  if (result != null) {
+                    setState(() {
+                      _pickedLatLng = result;
+                      _locationController.text =
+                          '${result.latitude.toStringAsFixed(5)}, '
+                          '${result.longitude.toStringAsFixed(5)}';
+                    });
+                  }
+                },
+                child: AbsorbPointer(
+                  child: TextField(
+                    controller: _locationController,
+                    decoration: InputDecoration(
+                      labelText: 'Fire Location',
+                      hintText: 'Tap to drop pin on map',
+                      border: const OutlineInputBorder(),
+                      prefixIcon:
+                          const Icon(Icons.location_on, color: Colors.red),
+                      suffixIcon: _pickedLatLng != null
+                          ? const Icon(Icons.check_circle,
+                              color: Colors.green)
+                          : const Icon(Icons.map, color: Colors.grey),
+                    ),
+                  ),
                 ),
               ),
               const SizedBox(height: 12),
@@ -360,7 +378,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       if (!mounted) return false;
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
-                            content: Text("Please select a fire type first!")),
+                            content:
+                                Text("Please select a fire type first!")),
                       );
                       return false;
                     }
@@ -369,7 +388,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       if (!mounted) return false;
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
-                            content: Text("Please enter the fire location!")),
+                            content:
+                                Text("Please drop a pin on the map first!")),
                       );
                       return false;
                     }
@@ -378,10 +398,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     return true;
                   },
                   label: DefaultTextStyle.merge(
-                    style: TextStyle(
-                      color: const Color.fromARGB(255, 237, 86, 86),
+                    style: const TextStyle(
+                      color: Color.fromARGB(255, 237, 86, 86),
                       fontWeight: FontWeight.w500,
-                      fontSize: 17),
+                      fontSize: 17,
+                    ),
                     child: const Text("Slide to Alarm All"),
                   ),
                   icon: const Icon(Icons.warning_amber_rounded,
@@ -433,7 +454,8 @@ class _HomeScreenState extends State<HomeScreen> {
         onTap: (index) => setState(() => _selectedIndex = index),
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
-          BottomNavigationBarItem(icon: Icon(Icons.message), label: 'Chats'),
+          BottomNavigationBarItem(
+              icon: Icon(Icons.message), label: 'Chats'),
           BottomNavigationBarItem(
               icon: Icon(Icons.settings), label: 'Settings'),
         ],

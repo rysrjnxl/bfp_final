@@ -6,15 +6,19 @@ class AlarmService {
 
   Future<void> triggerAlarm({
     required String fireType,
-    required String note,
     required String location,
+    required String note,
+    double? lat,
+    double? lng,
   }) async {
     await FirebaseFirestore.instance.collection('alarms').add({
       'fireType': fireType,
-      'note': note,
       'location': location,
+      'note': note,
+      'lat': lat,
+      'lng': lng,
+      'triggeredBy': FirebaseAuth.instance.currentUser?.displayName ?? 'Unknown',
       'timestamp': FieldValue.serverTimestamp(),
-      'triggeredBy': user?.displayName ?? 'Unknown',
     });
   }
 }

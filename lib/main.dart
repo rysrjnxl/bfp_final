@@ -9,7 +9,15 @@ import 'services/notification_service.dart';
 import 'services/settings_provider.dart';
 import 'home.dart';
 import 'signup.dart';
+import 'services/overlay_screen.dart';
 
+@pragma('vm:entry-point')
+void overlayMain() {
+  runApp(const MaterialApp(
+    debugShowCheckedModeBanner: false,
+    home: OverlayScreen(),
+  ));
+}
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
