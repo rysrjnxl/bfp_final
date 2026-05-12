@@ -1,28 +1,27 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:latlong2/latlong.dart';
 
 class AlarmService {
+  final User? user = FirebaseAuth.instance.currentUser;
+
   Future<void> triggerAlarm({
-    required String fireType,
-    required String location,
-    required String note,
-    double? lat,   // NEW: saved separately so overlay can read them
-    double? lng,   // NEW
-  }) async {
-    final user = FirebaseAuth.instance.currentUser;
-
-    final Map<String, dynamic> data = {
-      'fireType': fireType,
-      'location': location,
-      'note': note,
-      'triggeredBy': user?.displayName ?? user?.email ?? 'Unknown',
-      'timestamp': FieldValue.serverTimestamp(),
-    };
-
-    // Only include lat/lng if they were provided
-    if (lat != null) data['lat'] = lat;
-    if (lng != null) data['lng'] = lng;
-
-    await FirebaseFirestore.instance.collection('alarms').add(data);
-  }
+  required String fireType,
+  required String location,
+  required String note,
+  LatLng? latLng,
+}) async {
+  await FirebaseFirestore.instance.collection('alarms').add({
+    'fireType': fireType,
+    'location': location,
+    'note': note,
+    'timestamp': FieldValue.serverTimestamp(),
+    'triggeredBy': user?.displayName ?? 'Unknown',
+    'status': 'Reported',
+    if (latLng != null) ...{
+      'latitude': latLng.latitude,
+      'longitude': latLng.longitude,
+    },
+  });
+}
 }

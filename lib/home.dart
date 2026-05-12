@@ -6,8 +6,12 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:flutter_overlay_window/flutter_overlay_window.dart';
+import 'package:provider/provider.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:flutter_overlay_window/flutter_overlay_window.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:flutter/services.dart';
+import 'package:vibration/vibration.dart';
 import 'dart:async';
 import 'services/alarm_service.dart';
 import 'widgets/fire_tile.dart';
@@ -15,6 +19,8 @@ import 'widgets/map_picker.dart';
 import 'messages_screen.dart';
 import 'main.dart';
 import 'settings_screen.dart';
+import 'services/settings_provider.dart';
+
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -39,6 +45,8 @@ class _HomeScreenState extends State<HomeScreen> {
   StreamSubscription? _alarmsSubscription;
   StreamSubscription? _fcmOpenedSubscription;
 
+  
+
   String get _displayName =>
       (user?.displayName ?? user?.email?.split('@')[0] ?? 'User')
           .split(' ')
@@ -51,6 +59,10 @@ class _HomeScreenState extends State<HomeScreen> {
     _listenForFCMMessages();
   }
 
+  // inside lib/home.dart
+
+  bool _isInitialLoad = true; // Add this flag to your State class
+
   void _listenForAlarms() {
     _alarmsSubscription = FirebaseFirestore.instance
         .collection('alarms')
@@ -61,10 +73,19 @@ class _HomeScreenState extends State<HomeScreen> {
       (snapshot) {
         if (!mounted || snapshot.docs.isEmpty) return;
 
+        // Skip the very first alarm that exists when the stream starts
+        if (_isInitialLoad) {
+          _isInitialLoad = false;
+          final doc = snapshot.docs.first;
+          _lastAlarmId = doc.id; // Mark this as the "seen" alarm
+          return;
+        }
+
         final doc = snapshot.docs.first;
         final data = doc.data();
         final String alarmId = doc.id;
 
+        // Standard check to prevent double-firing
         if (alarmId == _lastAlarmId) return;
 
         final Timestamp? time = data['timestamp'] as Timestamp?;
@@ -80,16 +101,15 @@ class _HomeScreenState extends State<HomeScreen> {
           _ringPhone(
             data['fireType'] ?? 'Unknown Fire',
             data['location'] ?? 'Unknown Location',
-            data['note'] ?? '',
+            data['note'] ?? 'No additional notes',
             triggeredBy,
-            lat: (data['lat'] as num?)?.toDouble(),
-            lng: (data['lng'] as num?)?.toDouble(),
+            latitude: data['latitude'] != null ? (data['latitude'] as num).toDouble() : null,
+            longitude: data['longitude'] != null ? (data['longitude'] as num).toDouble() : null,
           );
         }
       },
-      onError: (error) => debugPrint('Alarms stream error: $error'),
     );
-  }
+  } 
 
   void _listenForFCMMessages() {
     _fcmOpenedSubscription =
@@ -104,76 +124,88 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _showAlertFromData(Map<String, dynamic> data) {
-    _ringPhone(
-      data['fireType'] ?? 'Unknown Fire',
-      data['location'] ?? 'Unknown Location',
-      data['note'] ?? '',
-      data['triggeredBy'] ?? 'Unknown',
-      lat: double.tryParse(data['lat']?.toString() ?? ''),
-      lng: double.tryParse(data['lng']?.toString() ?? ''),
+    _showEmergencyOverlay(
+      fireType: data['fireType'] ?? 'Unknown Fire',
+      location: data['location'] ?? 'Unknown Location',
+      note: data['note'] ?? 'No additional notes',
+      triggeredBy: data['triggeredBy'] ?? 'Unknown',
+      // If your push notifications include lat/lng, you can add them here too:
+      latitude: data['latitude'] != null ? double.tryParse(data['latitude'].toString()) : null,
+      longitude: data['longitude'] != null ? double.tryParse(data['longitude'].toString()) : null,
     );
   }
 
-  // — Alarm Actions
-
   Future<void> _ringPhone(
-    String fireType,
-    String location, 
-    String note, 
-    String triggeredBy, {
-      double? lat, 
-      double? lng}) async {
-    WakelockPlus.enable();
+    String fireType, String location, String note, String triggeredBy,
+    {double? latitude, double? longitude}) async {
+  WakelockPlus.enable();
 
-    // 1. Play sound logic (Keep as is)
+  final settings = Provider.of<SettingsProvider>(context, listen: false);
 
-    // 2. Handle Overlay
-    try {
-      bool hasPermission = await FlutterOverlayWindow.isPermissionGranted();
-      
-      // REQUEST PERMISSION if not granted
-      if (!hasPermission) {
-        hasPermission = await FlutterOverlayWindow.requestPermission() ?? false;
+  if (settings.vibrateOnAlert) {
+      bool? hasVibrator = await Vibration.hasVibrator();
+      if (hasVibrator == true) {
+        // Vibrate for 1 second, pause for 1 second, repeat
+        Vibration.vibrate(pattern: [1000, 1000, 1000, 1000, 1000, 1000], repeat: 0); 
       }
-
-      if (hasPermission) {
-        // If the overlay is already active, close it first to refresh data
-        if (await FlutterOverlayWindow.isActive()) {
-          await FlutterOverlayWindow.closeOverlay();
-        }
-
-        await FlutterOverlayWindow.showOverlay(
-          height: 620,
-          width: WindowSize.matchParent,
-          alignment: OverlayAlignment.center,
-          flag: OverlayFlag.defaultFlag,
-        );
-
-        // Data sharing
-        await Future.delayed(const Duration(milliseconds: 500));
-        await FlutterOverlayWindow.shareData({
-          'fireType': fireType,
-          'location': location,
-          'note': note,
-          'triggeredBy': triggeredBy,
-          'lat': lat,
-          'lng': lng,
-        });
-      } else {
-        // IN-APP FALLBACK: If permission still denied, show the dialog
-        _showEmergencyOverlay(fireType, location, note, triggeredBy);
-      }
-    } catch (e) {
-      debugPrint('Overlay error: $e');
-      _showEmergencyOverlay(fireType, location, note, triggeredBy);
     }
+
+  // ← Show overlay over other apps
+  if (await FlutterOverlayWindow.isPermissionGranted()) {
+    if (await FlutterOverlayWindow.isActive() == false) {
+      await FlutterOverlayWindow.showOverlay(
+        enableDrag: false,
+        overlayTitle: '🚨 FIRE ALERT',
+        overlayContent: '$fireType at $location',
+        flag: OverlayFlag.defaultFlag,
+        visibility: NotificationVisibility.visibilityPublic,
+        positionGravity: PositionGravity.auto,
+        height: 500,
+        width: WindowSize.matchParent,
+      );
+    }
+
+    // Send data to overlay
+    await FlutterOverlayWindow.shareData({
+      'fireType': fireType,
+      'location': location,
+      'note': note,
+      'triggeredBy': triggeredBy,
+      'latitude': latitude,
+      'longitude': longitude,
+    });
   }
+
+  // Vibrate
+  if (settings.vibrateOnAlert) {
+    HapticFeedback.heavyImpact();
+  }
+
+  // Play alarm
+  try {
+    await _audioPlayer.setVolume(1.0);
+    await _audioPlayer.setReleaseMode(ReleaseMode.loop);
+    await _audioPlayer.play(AssetSource('audio/${settings.alarmSound}'));
+  } catch (e) {
+    debugPrint('🔊 Audio error: $e');
+  }
+
+  _showEmergencyOverlay(
+    fireType: fireType,
+    location: location,
+    note: note,
+    triggeredBy: triggeredBy,
+    latitude: latitude,
+    longitude: longitude
+  );
+}
 
   Future<void> _acknowledgeAlarm() async {
     await _audioPlayer.stop();
     WakelockPlus.disable();
     if (!mounted) return;
-    Navigator.pop(context);
+
+    Vibration.cancel();
   }
 
   Future<void> _triggerAlarm() async {
@@ -182,8 +214,7 @@ class _HomeScreenState extends State<HomeScreen> {
         fireType: _selectedFireType!,
         location: _locationController.text,
         note: _noteController.text,
-        lat: _pickedLatLng?.latitude,
-        lng: _pickedLatLng?.longitude,
+        latLng: _pickedLatLng, // ← ADD
       );
 
       if (!mounted) return;
@@ -214,6 +245,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _handleLogout() async {
     await _alarmsSubscription?.cancel();
     await _fcmOpenedSubscription?.cancel();
+
     await _audioPlayer.stop();
     WakelockPlus.disable();
     await FirebaseAuth.instance.signOut();
@@ -226,69 +258,156 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // — In-app dialog fallback (used when overlay permission is denied)
-  void _showEmergencyOverlay(
-      String fireType, String location, String note, String triggeredBy) {
-    if (!mounted) return;
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.red[900],
-        title: const Row(
-          children: [
-            Icon(Icons.warning_amber_rounded, color: Colors.white, size: 30),
-            SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                '🚨 FIRE ALERT!',
-                style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold),
-              ),
-            ),
-          ],
-        ),
-        content: Column(
+  void _showEmergencyOverlay({
+  required String fireType,
+  required String location,
+  required String note,
+  required String triggeredBy,
+  double? latitude, // Pass these from your notification or stream
+  double? longitude,
+}) {
+  if (!mounted) return;
+
+  // Create a LatLng object if coordinates are provided
+  final LatLng? pinLocation = (latitude != null && longitude != null)
+      ? LatLng(latitude, longitude)
+      : null;
+
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (context) => AlertDialog(
+      backgroundColor: Colors.red[900],
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      contentPadding: EdgeInsets.zero, // Zero padding to allow map to hit edges
+      content: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Type: $fireType',
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Text('Location: $location',
-                style: const TextStyle(color: Colors.white, fontSize: 16)),
-            if (note.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text('Note: $note',
-                  style: const TextStyle(color: Colors.white, fontSize: 14)),
-            ],
-            const SizedBox(height: 8),
-            Text('Reported by: $triggeredBy',
-                style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.8), fontSize: 14)),
-          ],
-        ),
-        actions: [
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              icon: const Icon(Icons.check_circle),
-              label: const Text("ACKNOWLEDGE",
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white,
-                foregroundColor: Colors.red[900],
-                padding: const EdgeInsets.symmetric(vertical: 12),
+            // ── Header ──
+            Container(
+              padding: const EdgeInsets.all(16),
+              color: Colors.black26,
+              child: const Row(
+                children: [
+                  Icon(Icons.warning_amber_rounded, color: Colors.white, size: 28),
+                  SizedBox(width: 8),
+                  Text(
+                    '🚨 FIRE ALERT!',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold),
+                  ),
+                ],
               ),
-              onPressed: _acknowledgeAlarm,
             ),
+
+            // ── Map Preview ──
+            SizedBox(
+                height: 180,
+                child: pinLocation != null
+                    ? FlutterMap(
+                        options: MapOptions(
+                          initialCenter: pinLocation,
+                          initialZoom: 16,
+                          interactionOptions: const InteractionOptions(
+                            flags: InteractiveFlag.none, // ← non-interactive
+                          ),
+                        ),
+                        children: [
+                          TileLayer(
+                            urlTemplate:
+                                'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                            userAgentPackageName: 'com.example.bfp_final',
+                          ),
+                          MarkerLayer(
+                            markers: [
+                              Marker(
+                                point: pinLocation,
+                                width: 40,
+                                height: 40,
+                                child: const Icon(
+                                  Icons.location_pin,
+                                  color: Colors.red,
+                                  size: 40,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      )
+                    : Container(
+                        color: Colors.grey[200],
+                        child: const Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.map_outlined,
+                                  size: 40, color: Colors.grey),
+                              SizedBox(height: 8),
+                              Text('No map data available',
+                                  style: TextStyle(color: Colors.grey)),
+                            ],
+                          ),
+                        ),
+                      ),
+              ),
+
+            // ── Details ──
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Type: $fireType',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 4),
+                  Text('Location: $location',
+                      style: const TextStyle(color: Colors.white, fontSize: 16)),
+                  if (note.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text('Note: $note',
+                        style: const TextStyle(color: Colors.white70, fontSize: 14)),
+                  ],
+                  const SizedBox(height: 12),
+                  Text('Reported by: $triggeredBy',
+                      style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.6),
+                          fontSize: 12,
+                          fontStyle: FontStyle.italic)),
+                 ],
+                ),
+             ),
+
+            // ── Action ──
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.check_circle),
+                    label: const Text("ACKNOWLEDGE"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: Colors.red[900],
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                    ),
+                    onPressed: () {
+                      Navigator.pop(context); // Close dialog
+                      _acknowledgeAlarm();
+                    },
+                  ),
+                ),
+             ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -341,6 +460,14 @@ class _HomeScreenState extends State<HomeScreen> {
                       onTap: () =>
                           setState(() => _selectedFireType = 'Grass Fire'),
                     ),
+                    FireTile(
+                      label: 'Other',
+                      icon: Icons.more_horiz,
+                      color: const Color.fromARGB(255, 167, 167, 167),
+                      isSelected: _selectedFireType == 'Other',
+                      onTap: () =>
+                          setState(() => _selectedFireType = 'Other'),
+                    ),
                   ],
                 ),
               ],
@@ -362,43 +489,34 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // 📍 FIRE LOCATION — taps open the map picker
               GestureDetector(
                 onTap: () async {
-                  // MapPickerScreen now returns Map<String, dynamic>
-                  // with keys: 'location' (LatLng) and 'address' (String)
-                  final Map<String, dynamic>? result =
-                      await Navigator.push<Map<String, dynamic>>(
+                  final Map<String, dynamic>? result = await Navigator.push(
                     context,
-                    MaterialPageRoute(
-                        builder: (_) => const MapPickerScreen()),
+                    MaterialPageRoute(builder: (_) => const MapPickerScreen()),
                   );
                   if (result != null) {
                     final LatLng location = result['location'] as LatLng;
-                    final String address = result['address'] as String? ?? '';
+                    final String address = result['address'] as String;
                     setState(() {
                       _pickedLatLng = location;
-                      // Show the human-readable address if available,
-                      // otherwise fall back to coordinates
                       _locationController.text = address.isNotEmpty
                           ? address
                           : '${location.latitude.toStringAsFixed(5)}, '
-                              '${location.longitude.toStringAsFixed(5)}';
+                            '${location.longitude.toStringAsFixed(5)}';
                     });
                   }
                 },
-                child: AbsorbPointer(
+                child: AbsorbPointer( // ← ADD THIS
                   child: TextField(
                     controller: _locationController,
                     decoration: InputDecoration(
                       labelText: 'Fire Location',
                       hintText: 'Tap to drop pin on map',
                       border: const OutlineInputBorder(),
-                      prefixIcon:
-                          const Icon(Icons.location_on, color: Colors.red),
+                      prefixIcon: const Icon(Icons.location_on, color: Colors.red),
                       suffixIcon: _pickedLatLng != null
-                          ? const Icon(Icons.check_circle,
-                              color: Colors.green)
+                          ? const Icon(Icons.check_circle, color: Colors.green)
                           : const Icon(Icons.map, color: Colors.grey),
                     ),
                   ),
@@ -406,7 +524,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 12),
 
-              // 📝 ADDITIONAL NOTES
+              // 📝 ADDITIONAL NOTES FIELD
               TextField(
                 controller: _noteController,
                 decoration: const InputDecoration(
@@ -431,6 +549,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       );
                       return false;
                     }
+
                     if (_locationController.text.trim().isEmpty) {
                       if (!mounted) return false;
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -440,6 +559,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       );
                       return false;
                     }
+
                     await _triggerAlarm();
                     return true;
                   },
@@ -515,7 +635,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _fcmOpenedSubscription?.cancel();
     _audioPlayer.dispose();
     _noteController.dispose();
-    _locationController.dispose();
     super.dispose();
   }
 }

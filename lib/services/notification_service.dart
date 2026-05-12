@@ -11,46 +11,7 @@ final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-
-  // Must re-initialize plugin — background runs in a separate isolate
-  final plugin = FlutterLocalNotificationsPlugin();
-
-  await plugin
-      .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-      ?.createNotificationChannel(const AndroidNotificationChannel(
-        'high_importance_channel',
-        'Fire Alert Notifications',
-        description: 'High-priority BFP fire alerts.',
-        importance: Importance.max,
-        playSound: true,
-        sound: RawResourceAndroidNotificationSound('alarm'),
-        enableVibration: true,
-      ));
-
-  await plugin.initialize(
-    const InitializationSettings(
-      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-    ),
-  );
-
-  final data = message.data;
-  await plugin.show(
-    0,
-    '🚨 FIRE ALERT: ${data['fireType'] ?? 'Unknown Fire'}',
-    '📍 ${data['location'] ?? 'Unknown Location'}',
-    const NotificationDetails(
-      android: AndroidNotificationDetails(
-        'high_importance_channel',
-        'Fire Alert Notifications',
-        importance: Importance.max,
-        priority: Priority.max,
-        playSound: true,
-        sound: RawResourceAndroidNotificationSound('alarm'),
-        enableVibration: true,
-        fullScreenIntent: true, // ← acts as overlay when app is closed
-      ),
-    ),
-  );
+  debugPrint("Handling background alert: ${message.messageId}");
 }
 
 class NotificationService {
@@ -118,45 +79,45 @@ class NotificationService {
 
   void _listenForegroundMessages() {
     FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
+      final notification = message.notification;
+      final android = message.notification?.android;
       final data = message.data;
 
-      // Always show local notification for foreground
-      flutterLocalNotificationsPlugin.show(
-        DateTime.now().millisecondsSinceEpoch ~/ 1000,
-        '🚨 FIRE ALERT: ${data['fireType'] ?? 'Unknown'}',
-        '📍 ${data['location'] ?? 'Unknown Location'}',
-        const NotificationDetails(
-          android: AndroidNotificationDetails(
-            _channelId,
-            _channelName,
-            importance: Importance.max,
-            priority: Priority.max,
-            playSound: true,
-            sound: _sound,
-            enableVibration: true,
-            fullScreenIntent: true,
+      // Show local notification as fallback
+      if (notification != null && android != null) {
+        flutterLocalNotificationsPlugin.show(
+          notification.hashCode,
+          notification.title,
+          notification.body,
+          const NotificationDetails(
+            android: AndroidNotificationDetails(
+              _channelId,
+              _channelName,
+              importance: Importance.max,
+              priority: Priority.max,
+              playSound: true,
+              sound: _sound,
+              enableVibration: true,
+              fullScreenIntent: true,
+            ),
           ),
-        ),
-      );
+        );
+      }
+
+      // Show overlay on top of any app
       await _showOverlay(data);
     });
   }
 
   Future<void> _showOverlay(Map<String, dynamic> data) async {
     try {
-      final bool hasPermission = await FlutterOverlayWindow.isPermissionGranted();
-      if (!hasPermission) {
-        await FlutterOverlayWindow.requestPermission();
-        return; // don't proceed if just now requesting
-      }
+      final bool hasPermission =
+          await FlutterOverlayWindow.isPermissionGranted();
+      if (!hasPermission) return;
 
-      if (await FlutterOverlayWindow.isActive()) {
-        await FlutterOverlayWindow.closeOverlay();
-        await Future.delayed(const Duration(milliseconds: 300));
-      }
-
+      // Open the overlay window
       await FlutterOverlayWindow.showOverlay(
-        height: 620,                        // ✅ match home.dart height
+        height: 500,
         width: WindowSize.matchParent,
         alignment: OverlayAlignment.center,
         flag: OverlayFlag.defaultFlag,
@@ -164,8 +125,10 @@ class NotificationService {
         positionGravity: PositionGravity.auto,
       );
 
-      await Future.delayed(const Duration(milliseconds: 800)); // ✅ was 300ms — too short
+      // Small delay to let the overlay window initialize before sending data
+      await Future.delayed(const Duration(milliseconds: 300));
 
+      // Send alarm data to the overlay
       await FlutterOverlayWindow.shareData({
         'fireType': data['fireType'] ?? 'Fire Alert',
         'location': data['location'] ?? 'Unknown Location',

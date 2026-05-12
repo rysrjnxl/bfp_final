@@ -48,12 +48,12 @@ class _MessagesScreenState extends State<MessagesScreen>
       body: Column(
         children: [
           Container(
-            color: Theme.of(context).colorScheme.inversePrimary,
+            color: Color.fromARGB(0, 255, 255, 255),
             child: TabBar(
               controller: _tabController!,
               indicatorColor: const Color.fromARGB(255, 183, 58, 58),
-              labelColor: Colors.white,
-              unselectedLabelColor: Colors.grey,
+              labelColor: Theme.of(context).colorScheme.onSurface,
+              unselectedLabelColor: Theme.of(context).colorScheme.onSurfaceVariant,
               tabs: const [
                 Tab(text: 'Chats'),
                 Tab(text: 'People'),

@@ -251,7 +251,9 @@ class AlarmHistoryPage extends StatelessWidget {
                   ? Colors.green
                   : fireType.contains('Building')
                       ? Colors.orange
-                      : Colors.red;
+                      :fireType.contains('Residential')
+                       ? Colors.red
+                       : Colors.grey;
 
               return Card(
                 elevation: 2,

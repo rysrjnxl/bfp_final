@@ -1,16 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
 
-@pragma('vm:entry-point')
-void overlayMain() {
-  WidgetsFlutterBinding.ensureInitialized();
-  runApp(const MaterialApp(
-    debugShowCheckedModeBanner: false,
-    home: OverlayScreen(),
-  ));
-}
 
 class OverlayScreen extends StatefulWidget {
   const OverlayScreen({super.key});
@@ -37,8 +27,8 @@ class _OverlayScreenState extends State<OverlayScreen> {
           _location = data['location'] ?? 'Unknown Location';
           _note = data['note'] ?? '';
           _triggeredBy = data['triggeredBy'] ?? '';
-          _lat = (data['lat'] as num?)?.toDouble();
-          _lng = (data['lng'] as num?)?.toDouble();
+          _lat = data['lat'] as double?;
+          _lng = data['lng'] as double?;
         });
       }
     });
@@ -50,129 +40,101 @@ class _OverlayScreenState extends State<OverlayScreen> {
       color: Colors.red[900],
       child: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // — Header
+              // Header
               const Row(
                 children: [
                   Icon(Icons.warning_amber_rounded,
-                      color: Colors.white, size: 28),
-                  SizedBox(width: 8),
+                      color: Colors.white, size: 32),
+                  SizedBox(width: 10),
                   Text(
                     '🚨 FIRE ALERT!',
                     style: TextStyle(
                         color: Colors.white,
-                        fontSize: 22,
+                        fontSize: 24,
                         fontWeight: FontWeight.bold),
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 16),
 
-              // — Fire type
+              // Fire type
               Text(
                 'Type: $_fireType',
                 style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 18,
+                    fontSize: 20,
                     fontWeight: FontWeight.bold),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
 
-              // — Location text
+              // Location
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Icon(Icons.location_on,
-                      color: Colors.white70, size: 18),
-                  const SizedBox(width: 4),
+                      color: Colors.white70, size: 20),
+                  const SizedBox(width: 6),
                   Expanded(
                     child: Text(
                       _location,
                       style: const TextStyle(
-                          color: Colors.white, fontSize: 14),
+                          color: Colors.white, fontSize: 16),
                     ),
                   ),
                 ],
               ),
 
-              // — Map with pinned location
+              // Map thumbnail
               if (_lat != null && _lng != null) ...[
                 const SizedBox(height: 12),
                 ClipRRect(
                   borderRadius: BorderRadius.circular(12),
-                  child: SizedBox(
-                    height: 160,
-                    child: FlutterMap(
-                      options: MapOptions(
-                        initialCenter: LatLng(_lat!, _lng!),
-                        initialZoom: 15.0,
-                        // Disable all interaction so the overlay doesn't scroll the map
-                        interactionOptions: const InteractionOptions(
-                          flags: InteractiveFlag.none,
-                        ),
+                  child: Image.network(
+                    'https://staticmap.openstreetmap.de/staticmap.php'
+                    '?center=$_lat,$_lng'
+                    '&zoom=16&size=400x160'
+                    '&markers=$_lat,$_lng,red-pushpin',
+                    height: 150,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                    // FIX: renamed duplicate _ parameters
+                    errorBuilder: (context, error, stackTrace) => Container(
+                      height: 60,
+                      decoration: BoxDecoration(
+                        color: Colors.red[800],
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                      children: [
-                        TileLayer(
-                          urlTemplate:
-                              'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                          userAgentPackageName: 'com.example.bfp_final',
-                        ),
-                        MarkerLayer(
-                          markers: [
-                            Marker(
-                              point: LatLng(_lat!, _lng!),
-                              width: 40,
-                              height: 40,
-                              child: const Icon(
-                                Icons.location_pin,
-                                color: Colors.red,
-                                size: 40,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
+                      child: const Center(
+                        child: Text('Map unavailable',
+                            style: TextStyle(color: Colors.white54)),
+                      ),
                     ),
                   ),
                 ),
               ],
 
-              // — Note
               if (_note.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Icon(Icons.notes, color: Colors.white70, size: 18),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        _note,
-                        style: const TextStyle(
-                            color: Colors.white, fontSize: 14),
-                      ),
-                    ),
-                  ],
-                ),
+                const SizedBox(height: 12),
+                Text('Note: $_note',
+                    style: const TextStyle(
+                        color: Colors.white, fontSize: 14)),
               ],
-
-              // — Reported by
-              if (_triggeredBy.isNotEmpty) ...[
-                const SizedBox(height: 6),
+              const SizedBox(height: 8),
+              if (_triggeredBy.isNotEmpty)
                 Text(
                   'Reported by: $_triggeredBy',
                   style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.75),
-                      fontSize: 13),
+                      color: Colors.white.withValues(alpha: 0.8),
+                      fontSize: 14),
                 ),
-              ],
 
-              const SizedBox(height: 20),
+              const SizedBox(height: 24),
 
-              // — Acknowledge button
+              // Acknowledge button
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(

@@ -38,7 +38,7 @@ class AppSettingsScreen extends StatelessWidget {
             subtitle: const Text('Vibrate when a fire alarm is triggered'),
             secondary: const Icon(Icons.vibration),
             value: settings.vibrateOnAlert,
-            activeThumbColor: const Color.fromARGB(255, 183, 58, 58),           // ← replace activeColor
+            activeThumbColor: const Color.fromARGB(255, 183, 58, 58),
             activeTrackColor: const Color.fromARGB(255, 183, 58, 58).withValues(alpha: 0.5),
             onChanged: settings.toggleVibrate,
           ),
