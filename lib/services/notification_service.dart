@@ -3,6 +3,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:bfp_final/firebase_options.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
@@ -30,21 +31,22 @@ class NotificationService {
     _listenForegroundMessages();
   }
 
- Future<void> _createChannel() async {
-  const AndroidNotificationChannel channel = AndroidNotificationChannel(
-    _channelId,
-    _channelName,
-    description: _channelDesc,
-    importance: Importance.max,
-    playSound: true,
-    enableVibration: true,
-    sound: _sound,
-  );
+  Future<void> _createChannel() async {
+    const AndroidNotificationChannel channel = AndroidNotificationChannel(
+      _channelId,
+      _channelName,
+      description: _channelDesc,
+      importance: Importance.max,
+      playSound: true,
+      enableVibration: true,
+      sound: _sound,
+    );
 
-  await flutterLocalNotificationsPlugin
-      .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-      ?.createNotificationChannel(channel);
-}
+    await flutterLocalNotificationsPlugin
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(channel);
+  }
 
   Future<void> _initLocalNotifications() async {
     const AndroidInitializationSettings androidSettings =
@@ -55,12 +57,20 @@ class NotificationService {
   }
 
   Future<void> _requestPermissions() async {
+    // 1. Request FCM notification permission
     final FirebaseMessaging messaging = FirebaseMessaging.instance;
     await messaging.requestPermission(
       alert: true,
       sound: true,
       badge: true,
     );
+
+    // 2. Request SYSTEM_ALERT_WINDOW permission for overlay
+    final bool hasPermission =
+        await FlutterOverlayWindow.isPermissionGranted();
+    if (!hasPermission) {
+      await FlutterOverlayWindow.requestPermission();
+    }
   }
 
   Future<void> _subscribeToTopic() async {
@@ -68,10 +78,12 @@ class NotificationService {
   }
 
   void _listenForegroundMessages() {
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
       final notification = message.notification;
       final android = message.notification?.android;
+      final data = message.data;
 
+      // Show local notification as fallback
       if (notification != null && android != null) {
         flutterLocalNotificationsPlugin.show(
           notification.hashCode,
@@ -91,6 +103,42 @@ class NotificationService {
           ),
         );
       }
+
+      // Show overlay on top of any app
+      await _showOverlay(data);
     });
+  }
+
+  Future<void> _showOverlay(Map<String, dynamic> data) async {
+    try {
+      final bool hasPermission =
+          await FlutterOverlayWindow.isPermissionGranted();
+      if (!hasPermission) return;
+
+      // Open the overlay window
+      await FlutterOverlayWindow.showOverlay(
+        height: 500,
+        width: WindowSize.matchParent,
+        alignment: OverlayAlignment.center,
+        flag: OverlayFlag.defaultFlag,
+        enableDrag: false,
+        positionGravity: PositionGravity.auto,
+      );
+
+      // Small delay to let the overlay window initialize before sending data
+      await Future.delayed(const Duration(milliseconds: 300));
+
+      // Send alarm data to the overlay
+      await FlutterOverlayWindow.shareData({
+        'fireType': data['fireType'] ?? 'Fire Alert',
+        'location': data['location'] ?? 'Unknown Location',
+        'note': data['note'] ?? '',
+        'triggeredBy': data['triggeredBy'] ?? '',
+        'lat': data['lat'] != null ? double.tryParse(data['lat'].toString()) : null,
+        'lng': data['lng'] != null ? double.tryParse(data['lng'].toString()) : null,
+      });
+    } catch (e) {
+      debugPrint('Overlay error: $e');
+    }
   }
 }

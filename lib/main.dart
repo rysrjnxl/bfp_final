@@ -7,9 +7,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'services/notification_service.dart';
 import 'services/settings_provider.dart';
+import 'services/overlay_screen.dart';
 import 'home.dart';
 import 'signup.dart';
-import 'services/overlay_screen.dart';
 
 @pragma('vm:entry-point')
 void overlayMain() {
@@ -18,10 +18,11 @@ void overlayMain() {
     home: OverlayScreen(),
   ));
 }
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  await NotificationService().initialize();
+  await NotificationService().initialize(); // overlay permission handled inside here
 
   runApp(
     ChangeNotifierProvider(
@@ -36,34 +37,26 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Listen to SettingsProvider so app rebuilds when theme changes
     final settings = Provider.of<SettingsProvider>(context);
 
     return MaterialApp(
       title: 'BFP Fire Out',
       debugShowCheckedModeBanner: false,
-
-      // Light theme
-      themeMode: settings.themeMode, // Controlled by your Provider
-  
-  // LIGHT THEME
-  theme: ThemeData(
-    useMaterial3: true,
-    colorScheme: ColorScheme.fromSeed(
-      seedColor: const Color.fromARGB(255, 183, 58, 58),
-      brightness: Brightness.light,
-    ),
-  ),
-  
-  // DARK THEME
-  darkTheme: ThemeData(
-    useMaterial3: true,
-    colorScheme: ColorScheme.fromSeed(
-      seedColor: const Color.fromARGB(255, 183, 58, 58),
-      brightness: Brightness.dark,
-    ),
-  ),
-  
+      themeMode: settings.themeMode,
+      theme: ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color.fromARGB(255, 183, 58, 58),
+          brightness: Brightness.light,
+        ),
+      ),
+      darkTheme: ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color.fromARGB(255, 183, 58, 58),
+          brightness: Brightness.dark,
+        ),
+      ),
       home: StreamBuilder<User?>(
         stream: FirebaseAuth.instance.authStateChanges(),
         builder: (context, snapshot) {
@@ -195,7 +188,6 @@ class _LoginPageState extends State<LoginPage> {
     }
 
     setState(() => _isLoading = true);
-
     String emailToSignIn = input;
 
     try {

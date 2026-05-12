@@ -7,6 +7,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:latlong2/latlong.dart';
 import 'dart:async';
 import 'services/alarm_service.dart';
@@ -29,7 +30,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _selectedFireType;
   String? _lastAlarmId;
   GlobalKey _sliderKey = GlobalKey();
-  LatLng? _pickedLatLng; // stores the dropped pin coordinates
+  LatLng? _pickedLatLng;
 
   final TextEditingController _noteController = TextEditingController();
   final TextEditingController _locationController = TextEditingController();
@@ -81,14 +82,14 @@ class _HomeScreenState extends State<HomeScreen> {
           _ringPhone(
             data['fireType'] ?? 'Unknown Fire',
             data['location'] ?? 'Unknown Location',
-            data['note'] ?? 'No additional notes',
+            data['note'] ?? '',
             triggeredBy,
+            lat: (data['lat'] as num?)?.toDouble(),
+            lng: (data['lng'] as num?)?.toDouble(),
           );
         }
       },
-      onError: (error) {
-        debugPrint('Alarms stream error: $error');
-      },
+      onError: (error) => debugPrint('Alarms stream error: $error'),
     );
   }
 
@@ -105,30 +106,70 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _showAlertFromData(Map<String, dynamic> data) {
-    _showEmergencyOverlay(
+    _ringPhone(
       data['fireType'] ?? 'Unknown Fire',
       data['location'] ?? 'Unknown Location',
-      data['note'] ?? 'No additional notes',
+      data['note'] ?? '',
       data['triggeredBy'] ?? 'Unknown',
+      lat: double.tryParse(data['lat']?.toString() ?? ''),
+      lng: double.tryParse(data['lng']?.toString() ?? ''),
     );
   }
 
+  // — Alarm Actions
+
   Future<void> _ringPhone(
-      String fireType, String location, String note, String triggeredBy) async {
+    String fireType,
+    String location,
+    String note,
+    String triggeredBy, {
+    double? lat,
+    double? lng,
+  }) async {
     WakelockPlus.enable();
 
+    // 1. Play alarm sound
     try {
       final settings = Provider.of<SettingsProvider>(context, listen: false);
       final String selectedSound = settings.alarmSound;
-
       await _audioPlayer.setVolume(1.0);
       await _audioPlayer.setReleaseMode(ReleaseMode.loop);
       await _audioPlayer.play(AssetSource('audio/$selectedSound'));
     } catch (e) {
-      debugPrint('🔊 Audio error: $e');
+      debugPrint('Audio error: $e');
     }
 
-    _showEmergencyOverlay(fireType, location, note, triggeredBy);
+    // 2. Show system overlay (appears on top of ANY app or homescreen)
+    try {
+      final bool hasPermission =
+          await FlutterOverlayWindow.isPermissionGranted();
+      if (hasPermission) {
+        await FlutterOverlayWindow.showOverlay(
+          height: 620,
+          width: WindowSize.matchParent,
+          alignment: OverlayAlignment.center,
+          flag: OverlayFlag.defaultFlag,
+          enableDrag: false,
+          positionGravity: PositionGravity.auto,
+        );
+        // Small delay so the overlay window initializes before receiving data
+        await Future.delayed(const Duration(milliseconds: 400));
+        await FlutterOverlayWindow.shareData({
+          'fireType': fireType,
+          'location': location,
+          'note': note,
+          'triggeredBy': triggeredBy,
+          'lat': lat,
+          'lng': lng,
+        });
+      } else {
+        // Fallback: show in-app dialog if overlay permission not granted
+        _showEmergencyOverlay(fireType, location, note, triggeredBy);
+      }
+    } catch (e) {
+      debugPrint('Overlay error: $e');
+      _showEmergencyOverlay(fireType, location, note, triggeredBy);
+    }
   }
 
   Future<void> _acknowledgeAlarm() async {
@@ -144,6 +185,8 @@ class _HomeScreenState extends State<HomeScreen> {
         fireType: _selectedFireType!,
         location: _locationController.text,
         note: _noteController.text,
+        lat: _pickedLatLng?.latitude,
+        lng: _pickedLatLng?.longitude,
       );
 
       if (!mounted) return;
@@ -174,7 +217,6 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _handleLogout() async {
     await _alarmsSubscription?.cancel();
     await _fcmOpenedSubscription?.cancel();
-
     await _audioPlayer.stop();
     WakelockPlus.disable();
     await FirebaseAuth.instance.signOut();
@@ -187,6 +229,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // — In-app dialog fallback (used when overlay permission is denied)
   void _showEmergencyOverlay(
       String fireType, String location, String note, String triggeredBy) {
     if (!mounted) return;
@@ -222,12 +265,12 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 8),
             Text('Location: $location',
                 style: const TextStyle(color: Colors.white, fontSize: 16)),
-            const SizedBox(height: 8),
             if (note.isNotEmpty) ...[
+              const SizedBox(height: 8),
               Text('Note: $note',
                   style: const TextStyle(color: Colors.white, fontSize: 14)),
-              const SizedBox(height: 8),
             ],
+            const SizedBox(height: 8),
             Text('Reported by: $triggeredBy',
                 style: TextStyle(
                     color: Colors.white.withValues(alpha: 0.8), fontSize: 14)),
@@ -325,17 +368,25 @@ class _HomeScreenState extends State<HomeScreen> {
               // 📍 FIRE LOCATION — taps open the map picker
               GestureDetector(
                 onTap: () async {
-                  final LatLng? result = await Navigator.push(
+                  // MapPickerScreen now returns Map<String, dynamic>
+                  // with keys: 'location' (LatLng) and 'address' (String)
+                  final Map<String, dynamic>? result =
+                      await Navigator.push<Map<String, dynamic>>(
                     context,
                     MaterialPageRoute(
                         builder: (_) => const MapPickerScreen()),
                   );
                   if (result != null) {
+                    final LatLng location = result['location'] as LatLng;
+                    final String address = result['address'] as String? ?? '';
                     setState(() {
-                      _pickedLatLng = result;
-                      _locationController.text =
-                          '${result.latitude.toStringAsFixed(5)}, '
-                          '${result.longitude.toStringAsFixed(5)}';
+                      _pickedLatLng = location;
+                      // Show the human-readable address if available,
+                      // otherwise fall back to coordinates
+                      _locationController.text = address.isNotEmpty
+                          ? address
+                          : '${location.latitude.toStringAsFixed(5)}, '
+                              '${location.longitude.toStringAsFixed(5)}';
                     });
                   }
                 },
@@ -358,7 +409,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 12),
 
-              // 📝 ADDITIONAL NOTES FIELD
+              // 📝 ADDITIONAL NOTES
               TextField(
                 controller: _noteController,
                 decoration: const InputDecoration(
@@ -383,7 +434,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       );
                       return false;
                     }
-
                     if (_locationController.text.trim().isEmpty) {
                       if (!mounted) return false;
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -393,7 +443,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       );
                       return false;
                     }
-
                     await _triggerAlarm();
                     return true;
                   },
@@ -469,6 +518,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _fcmOpenedSubscription?.cancel();
     _audioPlayer.dispose();
     _noteController.dispose();
+    _locationController.dispose();
     super.dispose();
   }
 }
