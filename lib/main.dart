@@ -5,24 +5,24 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
+// Services
 import 'services/notification_service.dart';
 import 'services/settings_provider.dart';
-import 'services/overlay_screen.dart';
+
+// Screens
 import 'home.dart';
 import 'signup.dart';
 
-@pragma('vm:entry-point')
-void overlayMain() {
-  runApp(const MaterialApp(
-    debugShowCheckedModeBanner: false,
-    home: OverlayScreen(),
-  ));
-}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize Firebase
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  await NotificationService().initialize(); // overlay permission handled inside here
+  
+  // Initialize Notifications and request necessary permissions
+  await NotificationService().initialize(); 
 
   runApp(
     ChangeNotifierProvider(
@@ -37,11 +37,14 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Listen to the settings provider for live theme changes
     final settings = Provider.of<SettingsProvider>(context);
 
     return MaterialApp(
       title: 'BFP Fire Out',
       debugShowCheckedModeBanner: false,
+      
+      // Theme Configuration (Adaptive)
       themeMode: settings.themeMode,
       theme: ThemeData(
         useMaterial3: true,
@@ -57,36 +60,20 @@ class MyApp extends StatelessWidget {
           brightness: Brightness.dark,
         ),
       ),
+      
+      // Auth Wrapper Logic
       home: StreamBuilder<User?>(
         stream: FirebaseAuth.instance.authStateChanges(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Scaffold(
-                body: Center(child: CircularProgressIndicator()));
+              body: Center(child: CircularProgressIndicator()),
+            );
           }
 
           if (snapshot.hasData) {
             final user = snapshot.data!;
-
-            FirebaseFirestore.instance
-                .collection('users')
-                .doc(user.uid)
-                .get()
-                .then((doc) {
-              if (!doc.exists) {
-                FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(user.uid)
-                    .set({
-                  'uid': user.uid,
-                  'email': user.email ?? '',
-                  'displayName': user.displayName ?? '',
-                  'username': user.email?.split('@').first ?? '',
-                  'createdAt': FieldValue.serverTimestamp(),
-                });
-              }
-            });
-
+            _ensureUserDocExists(user);
             return const HomeScreen();
           }
 
@@ -94,6 +81,23 @@ class MyApp extends StatelessWidget {
         },
       ),
     );
+  }
+
+  /// Ensures user data exists in Firestore upon login
+  void _ensureUserDocExists(User user) {
+    final userDoc = FirebaseFirestore.instance.collection('users').doc(user.uid);
+    
+    userDoc.get().then((doc) {
+      if (!doc.exists) {
+        userDoc.set({
+          'uid': user.uid,
+          'email': user.email ?? '',
+          'displayName': user.displayName ?? '',
+          'username': user.email?.split('@').first ?? 'user',
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      }
+    });
   }
 }
 
@@ -114,63 +118,41 @@ class _LoginPageState extends State<LoginPage> {
     try {
       final GoogleSignIn googleSignIn = GoogleSignIn();
       await googleSignIn.signOut();
-      await googleSignIn
-          .disconnect()
-          .timeout(const Duration(seconds: 3))
-          .catchError((_) => null);
-
+      
       final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
       if (googleUser == null) return;
 
-      final GoogleSignInAuthentication googleAuth =
-          await googleUser.authentication;
-
+      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
       final AuthCredential credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
       );
 
-      final UserCredential userCredential =
-          await FirebaseAuth.instance.signInWithCredential(credential);
-
+      final UserCredential userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
       final user = userCredential.user;
 
       if (user != null) {
-        final userDoc =
-            FirebaseFirestore.instance.collection('users').doc(user.uid);
-
+        final userDoc = FirebaseFirestore.instance.collection('users').doc(user.uid);
         final docSnapshot = await userDoc.get();
 
         if (!docSnapshot.exists) {
-          final baseName =
-              (user.displayName ?? user.email?.split('@').first ?? 'user')
-                  .toLowerCase()
-                  .replaceAll(' ', '');
-          final randomSuffix =
-              (1000 + (DateTime.now().millisecondsSinceEpoch % 9000))
-                  .toString();
-          final generatedUsername = '$baseName$randomSuffix';
-
+          final baseName = (user.displayName ?? user.email?.split('@').first ?? 'user')
+              .toLowerCase()
+              .replaceAll(' ', '');
+          final randomSuffix = (1000 + (DateTime.now().millisecondsSinceEpoch % 9000)).toString();
+          
           await userDoc.set({
             'uid': user.uid,
             'email': user.email ?? '',
             'displayName': user.displayName ?? '',
-            'username': generatedUsername,
+            'username': '$baseName$randomSuffix',
             'createdAt': FieldValue.serverTimestamp(),
           });
         }
       }
-
-      if (!mounted) return;
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const HomeScreen()),
-      );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Google Auth Error: $e')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Google Error: $e')));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -181,9 +163,7 @@ class _LoginPageState extends State<LoginPage> {
     final String password = _passwordController.text.trim();
 
     if (input.isEmpty || password.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill in all fields')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please fill in all fields')));
       return;
     }
 
@@ -200,8 +180,7 @@ class _LoginPageState extends State<LoginPage> {
         if (query.docs.isNotEmpty) {
           emailToSignIn = query.docs.first.get('email');
         } else {
-          throw FirebaseAuthException(
-              code: 'user-not-found', message: 'Account not found');
+          throw FirebaseAuthException(code: 'user-not-found', message: 'Account not found');
         }
       }
 
@@ -209,17 +188,9 @@ class _LoginPageState extends State<LoginPage> {
         email: emailToSignIn,
         password: password,
       );
-
-      if (!mounted) return;
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const HomeScreen()),
-      );
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message ?? 'Auth Error')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message ?? 'Auth Error')));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -227,9 +198,11 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        backgroundColor: theme.colorScheme.primaryContainer,
         title: const Text('Fire Out'),
         centerTitle: true,
       ),
@@ -240,11 +213,9 @@ class _LoginPageState extends State<LoginPage> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.local_fire_department,
-                    size: 100, color: Color.fromARGB(255, 183, 58, 58)),
+                Icon(Icons.local_fire_department, size: 100, color: theme.colorScheme.primary),
                 const SizedBox(height: 30),
-                Text('Welcome!',
-                    style: Theme.of(context).textTheme.headlineMedium),
+                Text('Welcome!', style: theme.textTheme.headlineMedium),
                 const SizedBox(height: 30),
                 TextField(
                   controller: _emailController,
@@ -271,16 +242,11 @@ class _LoginPageState extends State<LoginPage> {
                   child: ElevatedButton(
                     onPressed: _isLoading ? null : _handleLogin,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color.fromARGB(255, 183, 58, 58),
-                      foregroundColor: Colors.white,
+                      backgroundColor: theme.colorScheme.primary,
+                      foregroundColor: theme.colorScheme.onPrimary,
                     ),
                     child: _isLoading
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(
-                                color: Colors.white, strokeWidth: 2),
-                          )
+                        ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                         : const Text('Login', style: TextStyle(fontSize: 18)),
                   ),
                 ),
@@ -292,9 +258,6 @@ class _LoginPageState extends State<LoginPage> {
                     label: const Text('Continue with Google'),
                     icon: const Icon(Icons.account_circle),
                     onPressed: _isLoading ? null : _handleGoogleLogin,
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: Colors.grey),
-                    ),
                   ),
                 ),
                 const SizedBox(height: 15),
@@ -307,11 +270,7 @@ class _LoginPageState extends State<LoginPage> {
                   children: [
                     const Text("Don't have an account?"),
                     TextButton(
-                      onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const RegisterPage()),
-                      ),
+                      onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RegisterPage())),
                       child: const Text('Sign Up'),
                     ),
                   ],

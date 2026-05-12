@@ -6,7 +6,6 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:provider/provider.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:latlong2/latlong.dart';
 import 'dart:async';
@@ -16,7 +15,6 @@ import 'widgets/map_picker.dart';
 import 'messages_screen.dart';
 import 'main.dart';
 import 'settings_screen.dart';
-import 'services/settings_provider.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -120,40 +118,39 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _ringPhone(
     String fireType,
-    String location,
-    String note,
+    String location, 
+    String note, 
     String triggeredBy, {
-    double? lat,
-    double? lng,
-  }) async {
+      double? lat, 
+      double? lng}) async {
     WakelockPlus.enable();
 
-    // 1. Play alarm sound
-    try {
-      final settings = Provider.of<SettingsProvider>(context, listen: false);
-      final String selectedSound = settings.alarmSound;
-      await _audioPlayer.setVolume(1.0);
-      await _audioPlayer.setReleaseMode(ReleaseMode.loop);
-      await _audioPlayer.play(AssetSource('audio/$selectedSound'));
-    } catch (e) {
-      debugPrint('Audio error: $e');
-    }
+    // 1. Play sound logic (Keep as is)
 
-    // 2. Show system overlay (appears on top of ANY app or homescreen)
+    // 2. Handle Overlay
     try {
-      final bool hasPermission =
-          await FlutterOverlayWindow.isPermissionGranted();
+      bool hasPermission = await FlutterOverlayWindow.isPermissionGranted();
+      
+      // REQUEST PERMISSION if not granted
+      if (!hasPermission) {
+        hasPermission = await FlutterOverlayWindow.requestPermission() ?? false;
+      }
+
       if (hasPermission) {
+        // If the overlay is already active, close it first to refresh data
+        if (await FlutterOverlayWindow.isActive()) {
+          await FlutterOverlayWindow.closeOverlay();
+        }
+
         await FlutterOverlayWindow.showOverlay(
           height: 620,
           width: WindowSize.matchParent,
           alignment: OverlayAlignment.center,
           flag: OverlayFlag.defaultFlag,
-          enableDrag: false,
-          positionGravity: PositionGravity.auto,
         );
-        // Small delay so the overlay window initializes before receiving data
-        await Future.delayed(const Duration(milliseconds: 400));
+
+        // Data sharing
+        await Future.delayed(const Duration(milliseconds: 500));
         await FlutterOverlayWindow.shareData({
           'fireType': fireType,
           'location': location,
@@ -163,7 +160,7 @@ class _HomeScreenState extends State<HomeScreen> {
           'lng': lng,
         });
       } else {
-        // Fallback: show in-app dialog if overlay permission not granted
+        // IN-APP FALLBACK: If permission still denied, show the dialog
         _showEmergencyOverlay(fireType, location, note, triggeredBy);
       }
     } catch (e) {

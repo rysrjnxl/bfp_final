@@ -1,83 +1,30 @@
-const functions = require("firebase-functions");
-const admin = require("firebase-admin");
-admin.initializeApp();
+const { onDocumentCreated } = require("firebase-functions/v2/firestore");
+const { initializeApp } = require("firebase-admin/app");
+const { getMessaging } = require("firebase-admin/messaging");
 
-// ← Existing fire alarm function
-exports.sendFireAlarm = functions.firestore
-  .document("alarms/{alarmId}")
-  .onCreate(async (snap, context) => {
-    const data = snap.data();
-    const fireType = data.fireType || "Unknown Fire";
-    const note = data.note || "No additional notes";
-    const triggeredBy = data.triggeredBy || "Unknown";
+initializeApp();
 
-    console.log(`New alarm: ${fireType} by ${triggeredBy}`);
+exports.sendAlarmNotification = onDocumentCreated(
+  "alarms/{alarmId}",
+  async (event) => {
+    const data = event.data.data();
 
     const message = {
-      notification: {
-        title: `🚨 FIRE ALERT - ${fireType}`,
-        body: `📍 ${note} | 👤 ${triggeredBy}`,
-      },
+      topic: "station_alerts",
       data: {
-        fireType: fireType,
-        note: note,
-        triggeredBy: triggeredBy,
+        fireType: data.fireType ?? "Fire Alert",
+        location: data.location ?? "Unknown Location",
+        note: data.note ?? "",
+        triggeredBy: data.triggeredBy ?? "",
+        lat: data.lat?.toString() ?? "",
+        lng: data.lng?.toString() ?? "",
       },
       android: {
         priority: "high",
-        notification: {
-          channelId: "high_importance_channel",
-          priority: "max",
-          defaultSound: false,
-          sound: "alarm",
-          vibrateTimingsMillis: [0, 500, 200, 500],
-          visibility: "public",
-        },
+        ttl: 30000,
       },
-      topic: "station_alerts",
     };
 
-    try {
-      const response = await admin.messaging().send(message);
-      console.log("Alarm notification sent successfully:", response);
-      await snap.ref.update({ notificationSent: true });
-    } catch (error) {
-      console.error("Error sending alarm notification:", error);
-    }
-  });
-
-exports.sendChatNotification = functions.firestore
-  .document("chats/{messageId}") // ← changed from messages
-  .onCreate(async (snap, context) => {
-    const data = snap.data();
-    const senderName = data.senderName || "Someone";
-    const text = data.text || "Sent a message";
-
-    const message = {
-      notification: {
-        title: `💬 ${senderName}`,
-        body: text,
-      },
-      data: {
-        type: "chat",
-        senderName: senderName,
-        text: text,
-      },
-      android: {
-        priority: "high",
-        notification: {
-          channelId: "high_importance_channel",
-          priority: "high",
-          defaultSound: true,
-        },
-      },
-      topic: "station_alerts",
-    };
-
-    try {
-      await admin.messaging().send(message);
-      console.log("Chat notification sent!");
-    } catch (error) {
-      console.error("Error sending chat notification:", error);
-    }
-  });
+    await getMessaging().send(message);
+  }
+);

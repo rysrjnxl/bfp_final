@@ -5,6 +5,7 @@ import 'package:latlong2/latlong.dart';
 
 @pragma('vm:entry-point')
 void overlayMain() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const MaterialApp(
     debugShowCheckedModeBanner: false,
     home: OverlayScreen(),
